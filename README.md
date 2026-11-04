@@ -3,6 +3,17 @@
 Resq-AI is an AI-powered disaster management system with a React frontend,
 Express/MongoDB backend, and FastAPI machine-learning service.
 
+## Completed backend work
+
+- Added production-oriented User, Household, and SOS incident schemas.
+- Added JWT registration, login, and protected current-user authentication.
+- Added bcrypt password hashing and role-based responder/admin authorization.
+- Added protected AI chat endpoint with rolling `memorySummary` updates.
+- Added guest SOS reporting without creating guest user accounts.
+- Added SOS emergency types, location/contact validation, and incident status handling.
+- Added automatic deletion of resolved SOS incidents 24 hours after resolution using
+  a MongoDB TTL index.
+
 ## Project layout
 
 - `Frontend/Resq-AI`: React + Vite frontend
