@@ -39,6 +39,8 @@ Authentication endpoints:
 - `POST /api/auth/login`
 - `GET /api/auth/me` with a `Bearer` token
 - `POST /api/chat/message` with a `Bearer` token and `{ "message": "..." }`
+- `POST /api/sos/guest` for guest emergency reports
+- `PATCH /api/sos/:id/resolve` for authenticated admins/responders
 
 ### ML service
 

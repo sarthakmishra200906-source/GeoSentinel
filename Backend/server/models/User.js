@@ -38,7 +38,7 @@ const userSchema = new mongoose.Schema(
       default: 'New user, no prior emergency chat history.',
       trim: true,
     },
-    role: { type: String, enum: ['user', 'admin'], default: 'user' },
+    role: { type: String, enum: ['user', 'admin', 'responder'], default: 'user' },
   },
   { timestamps: true },
 )

@@ -6,6 +6,7 @@ import adminRoutes from './routes/admin.js'
 import authRoutes from './routes/authRoutes.js'
 import chatRoutes from './routes/chatRoutes.js'
 import reportsRoutes from './routes/reports.js'
+import sosRoutes from './routes/sosRoutes.js'
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js'
 
 const app = express()
@@ -24,6 +25,7 @@ app.use('/api/reports', reportsRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/auth', authRoutes)
 app.use('/api/chat', chatRoutes)
+app.use('/api/sos', sosRoutes)
 app.use(notFoundHandler)
 app.use(errorHandler)
 

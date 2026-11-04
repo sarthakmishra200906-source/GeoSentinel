@@ -2,44 +2,55 @@ import mongoose from 'mongoose'
 
 const sosIncidentSchema = new mongoose.Schema(
   {
-    reportedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    location: {
-      type: {
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    guestContact: {
+      name: { type: String, trim: true, default: '' },
+      phone: {
         type: String,
-        enum: ['Point'],
-        required: true,
-        default: 'Point',
-      },
-      coordinates: {
-        type: [Number],
-        required: true,
-        validate: {
-          validator: (coordinates) =>
-            coordinates.length === 2 &&
-            coordinates[0] >= -180 &&
-            coordinates[0] <= 180 &&
-            coordinates[1] >= -90 &&
-            coordinates[1] <= 90,
-          message: 'location coordinates must be [longitude, latitude]',
+        trim: true,
+        required() {
+          return !this.ownerDocument().user
         },
       },
     },
-    imageUrls: [{ type: String, trim: true }],
-    description: { type: String, required: true, trim: true },
-    aiSeverityScore: {
-      type: String,
-      enum: ['Low', 'Medium', 'Critical'],
-      default: 'Low',
+    location: {
+      latitude: { type: Number, required: true, min: -90, max: 90 },
+      longitude: { type: Number, required: true, min: -180, max: 180 },
+      address: { type: String, trim: true, default: '' },
     },
+    emergencyType: {
+      type: String,
+      enum: ['Medical', 'Trapped', 'Evacuation', 'Food/Water', 'Other'],
+      default: 'Evacuation',
+    },
+    description: { type: String, trim: true, default: '' },
     status: {
       type: String,
-      enum: ['Pending', 'Responding', 'Resolved'],
-      default: 'Pending',
+      enum: ['active', 'in-progress', 'resolved', 'cancelled'],
+      default: 'active',
     },
+    resolvedAt: { type: Date, default: null },
   },
   { timestamps: true },
 )
 
-sosIncidentSchema.index({ location: '2dsphere' })
+sosIncidentSchema.index({ resolvedAt: 1 }, { expireAfterSeconds: 86400 })
+
+sosIncidentSchema.pre('validate', function validateGuestContact(next) {
+  if (!this.user && !this.guestContact?.phone) {
+    this.invalidate('guestContact.phone', 'Phone is required for guest SOS reports')
+  }
+  next()
+})
+
+sosIncidentSchema.pre('save', function setResolvedTimestamp(next) {
+  if (this.isModified('status') && this.status === 'resolved' && !this.resolvedAt) {
+    this.resolvedAt = new Date()
+  }
+  if (this.isModified('status') && this.status !== 'resolved') {
+    this.resolvedAt = null
+  }
+  next()
+})
 
 export default mongoose.model('SOSIncident', sosIncidentSchema)
