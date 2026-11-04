@@ -38,6 +38,7 @@ Authentication endpoints:
 - `POST /api/auth/register`
 - `POST /api/auth/login`
 - `GET /api/auth/me` with a `Bearer` token
+- `POST /api/chat/message` with a `Bearer` token and `{ "message": "..." }`
 
 ### ML service
 

@@ -4,6 +4,7 @@ import express from 'express'
 import mongoose from 'mongoose'
 import adminRoutes from './routes/admin.js'
 import authRoutes from './routes/authRoutes.js'
+import chatRoutes from './routes/chatRoutes.js'
 import reportsRoutes from './routes/reports.js'
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js'
 
@@ -22,6 +23,7 @@ app.get('/api/health', (request, response) => {
 app.use('/api/reports', reportsRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/auth', authRoutes)
+app.use('/api/chat', chatRoutes)
 app.use(notFoundHandler)
 app.use(errorHandler)
 
