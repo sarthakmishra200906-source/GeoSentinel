@@ -3,6 +3,7 @@ import cors from 'cors'
 import express from 'express'
 import mongoose from 'mongoose'
 import adminRoutes from './routes/admin.js'
+import authRoutes from './routes/authRoutes.js'
 import reportsRoutes from './routes/reports.js'
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js'
 
@@ -20,12 +21,15 @@ app.get('/api/health', (request, response) => {
 })
 app.use('/api/reports', reportsRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/auth', authRoutes)
 app.use(notFoundHandler)
 app.use(errorHandler)
 
 async function startServer() {
   if (process.env.MONGO_URI) {
-    await mongoose.connect(process.env.MONGO_URI)
+    await mongoose.connect(process.env.MONGO_URI, {
+      dbName: process.env.MONGO_DB_NAME || 'resq_ai_db',
+    })
     console.log('Connected to MongoDB')
   } else {
     console.warn('MONGO_URI is not configured; database routes will not be available')

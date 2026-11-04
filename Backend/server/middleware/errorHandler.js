@@ -9,7 +9,9 @@ export function errorHandler(error, request, response, next) {
   }
 
   console.error(error)
-  response.status(error.statusCode || 500).json({
-    error: error.statusCode ? error.message : 'Internal server error',
+  const statusCode =
+    error.statusCode || (error.name === 'ValidationError' || error.name === 'CastError' ? 400 : 500)
+  response.status(statusCode).json({
+    error: statusCode === 500 ? 'Internal server error' : error.message,
   })
 }

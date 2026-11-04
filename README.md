@@ -29,7 +29,15 @@ npm start
 ```
 
 Set `MONGO_URI` in `Backend\server\.env` before using report endpoints. The API
-health check is available at `http://localhost:5000/api/health`.
+health check is available at `http://localhost:5000/api/health`. Set a long
+random `JWT_SECRET` in the same file before using `/api/auth/register` or
+`/api/auth/login`.
+
+Authentication endpoints:
+
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/auth/me` with a `Bearer` token
 
 ### ML service
 
