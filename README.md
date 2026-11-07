@@ -13,6 +13,39 @@ Express/MongoDB backend, and FastAPI machine-learning service.
 - Added SOS emergency types, location/contact validation, and incident status handling.
 - Added automatic deletion of resolved SOS incidents 24 hours after resolution using
   a MongoDB TTL index.
+- Added authenticated and guest help reports with required contact details, location,
+  optional image uploads, and user ownership for signed-in reports.
+- Added local image storage with file-size/type limits, JPEG compression, and MongoDB
+  image path metadata so binary files are not stored in documents.
+- Added server-side OpenWeather tile proxying, regional weather point readings, and
+  optional cyclone track configuration.
+
+## Frontend features
+
+- Responsive navigation: compact mobile menu and full tablet/desktop navigation.
+- Scrollable responsive cards for guidelines, help requests, login, registration, and
+  the authenticated AI assistant.
+- Weather map controls with temperature, rain, wind, cloud, and cyclone layers.
+- Current-location map control and editable location fields in the Help box.
+
+## Environment configuration
+
+Copy `Backend\server\.env.example` to `Backend\server\.env` and set your own values.
+Never commit real API keys or secrets. The OpenWeather key belongs only in the backend:
+
+```env
+OPENWEATHER_API_KEY=your-openweather-api-key
+```
+
+The optional `WEATHER_STORM_TRACKS_JSON` value accepts an array such as:
+
+```env
+WEATHER_STORM_TRACKS_JSON=[{"id":"storm-1","name":"Example","coordinates":[[20,85],[21,86]]}]
+```
+
+Local help-request images are written to `Backend\server\uploads` during development.
+Only the generated file path and metadata are stored in MongoDB. For production,
+replace this local adapter with a cloud object-storage adapter.
 
 ## Project layout
 
@@ -52,6 +85,10 @@ Authentication endpoints:
 - `POST /api/chat/message` with a `Bearer` token and `{ "message": "..." }`
 - `POST /api/sos/guest` for guest emergency reports
 - `PATCH /api/sos/:id/resolve` for authenticated admins/responders
+- `POST /api/reports` for guest or authenticated multipart help reports
+- `GET /api/weather/points` for regional weather readings
+- `GET /api/weather/tiles/:layer/:z/:x/:y.png` for proxied weather tiles
+- `GET /api/weather/storms` for configured cyclone tracks
 
 ### ML service
 
