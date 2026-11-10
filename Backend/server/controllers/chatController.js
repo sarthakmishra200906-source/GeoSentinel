@@ -1,4 +1,5 @@
 import User from '../models/User.js'
+import GuidelineDocument from '../models/GuidelineDocument.js'
 
 const mobilityKeywords = ['wheelchair', 'pwd', 'mobility assistance']
 
@@ -28,7 +29,20 @@ export async function handleUserChat(request, response, next) {
       await user.save()
     }
 
-    const aiResponse = `Received your update: "${message.trim()}". Emergency profile updated.`
+    const terms = normalizedMessage.split(/\W+/).filter((term) => term.length > 2)
+    const documents = await GuidelineDocument.find({ status: 'approved' }).select('title officialUrl issuingAuthority chunks').lean()
+    const matches = documents
+      .flatMap((document) =>
+        document.chunks
+          .map((chunk) => ({ document, chunk, score: terms.reduce((score, term) => score + (chunk.text.toLowerCase().includes(term) ? 1 : 0), 0) })),
+      )
+      .filter((match) => match.score > 0)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 3)
+
+    const aiResponse = matches.length
+      ? `I found approved government guidance relevant to your question. Review the cited passages below; an LLM may use only this context.`
+      : 'I could not find approved government guidance supporting an answer to that question.'
 
     response.status(200).json({
       success: true,
@@ -36,6 +50,15 @@ export async function handleUserChat(request, response, next) {
         userMessage: message.trim(),
         aiResponse,
         currentMemorySummary: user.memorySummary || currentMemorySummary,
+        grounded: matches.length > 0,
+        status: matches.length > 0 ? 'GROUNDED_CONTEXT' : 'NO_SUPPORT',
+        sources: matches.map(({ document, chunk }) => ({
+          title: document.title,
+          issuingAuthority: document.issuingAuthority,
+          officialUrl: document.officialUrl,
+          section: chunk.section,
+          context: chunk.text,
+        })),
       },
     })
   } catch (error) {

@@ -3,6 +3,14 @@
 Resq-AI is an AI-powered disaster management system with a React frontend,
 Express/MongoDB backend, and FastAPI machine-learning service.
 
+## Current status
+
+The local baseline, weather map, non-operational flood model, admin
+verification flow, rescue-center APIs, and approved-document retrieval
+foundation are implemented. The flood model is not an operational alert model,
+and the retrieval foundation does not call an LLM until a provider and
+document-review process are configured.
+
 ## Completed backend work
 
 - Added production-oriented User, Household, and SOS incident schemas.
@@ -96,4 +104,36 @@ Authentication endpoints:
 cd Backend\ml_service
 python -m pip install -r requirements.txt
 python -m uvicorn main:app --reload --port 8000
+```
+
+Train the local, non-operational baseline from the verified Kaggle archive:
+
+```powershell
+python Backend\ml_service\training\train_model.py
+```
+
+The model artifact is generated under `Backend\ml_service\model` and is
+ignored by git. It uses only the dataset's 20 validated features; live weather
+is intentionally not converted into those features.
+
+### Start all local services
+
+From the repository root, run:
+
+```powershell
+python scripts\start_local.py
+```
+
+This starts the Express backend, FastAPI service, and Vite frontend together.
+Press `Ctrl+C` once to stop all three processes. Validate the Kaggle archive
+before training with:
+
+```powershell
+python scripts\validate_dataset.py
+```
+
+With the services running, run local smoke checks:
+
+```powershell
+python scripts\smoke_local.py
 ```

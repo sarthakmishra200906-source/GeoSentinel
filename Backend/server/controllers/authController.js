@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import User from '../models/User.js'
+import AdminVerification from '../models/AdminVerification.js'
 
 function createToken(user) {
   if (!process.env.JWT_SECRET) {
@@ -28,12 +29,29 @@ export async function register(request, response, next) {
       return
     }
 
+    const requestedRole = body.accountType === 'admin' ? 'admin' : 'user'
+    if (requestedRole === 'admin' && typeof body.governmentIdReference !== 'string') {
+      response.status(400).json({ error: 'governmentIdReference is required for admin verification' })
+      return
+    }
+
     const user = await User.create({
       ...body,
+      role: requestedRole === 'admin' ? 'user' : 'user',
       password: await bcrypt.hash(body.password, 12),
     })
+    if (requestedRole === 'admin') {
+      await AdminVerification.create({
+        user: user._id,
+        governmentIdReference: body.governmentIdReference,
+      })
+    }
     const token = createToken(user)
-    response.status(201).json({ token, user: publicUser(user) })
+    response.status(201).json({
+      token,
+      user: publicUser(user),
+      adminVerification: requestedRole === 'admin' ? 'pending' : null,
+    })
   } catch (error) {
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern)[0]

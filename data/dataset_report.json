@@ -1,0 +1,125 @@
+{
+  "archive": "train.csv.zip",
+  "csv": "train.csv",
+  "row_count": 1117957,
+  "column_count": 22,
+  "columns": [
+    "id",
+    "MonsoonIntensity",
+    "TopographyDrainage",
+    "RiverManagement",
+    "Deforestation",
+    "Urbanization",
+    "ClimateChange",
+    "DamsQuality",
+    "Siltation",
+    "AgriculturalPractices",
+    "Encroachments",
+    "IneffectiveDisasterPreparedness",
+    "DrainageSystems",
+    "CoastalVulnerability",
+    "Landslides",
+    "Watersheds",
+    "DeterioratingInfrastructure",
+    "PopulationScore",
+    "WetlandLoss",
+    "InadequatePlanning",
+    "PoliticalFactors",
+    "FloodProbability"
+  ],
+  "target_candidate": "FloodProbability",
+  "target_confirmed": false,
+  "duplicate_id_count": 0,
+  "missing_values": {},
+  "numeric_ranges": {
+    "id": {
+      "min": 0.0,
+      "max": 1117956.0
+    },
+    "MonsoonIntensity": {
+      "min": 0.0,
+      "max": 16.0
+    },
+    "TopographyDrainage": {
+      "min": 0.0,
+      "max": 18.0
+    },
+    "RiverManagement": {
+      "min": 0.0,
+      "max": 16.0
+    },
+    "Deforestation": {
+      "min": 0.0,
+      "max": 17.0
+    },
+    "Urbanization": {
+      "min": 0.0,
+      "max": 17.0
+    },
+    "ClimateChange": {
+      "min": 0.0,
+      "max": 17.0
+    },
+    "DamsQuality": {
+      "min": 0.0,
+      "max": 16.0
+    },
+    "Siltation": {
+      "min": 0.0,
+      "max": 16.0
+    },
+    "AgriculturalPractices": {
+      "min": 0.0,
+      "max": 16.0
+    },
+    "Encroachments": {
+      "min": 0.0,
+      "max": 18.0
+    },
+    "IneffectiveDisasterPreparedness": {
+      "min": 0.0,
+      "max": 16.0
+    },
+    "DrainageSystems": {
+      "min": 0.0,
+      "max": 17.0
+    },
+    "CoastalVulnerability": {
+      "min": 0.0,
+      "max": 17.0
+    },
+    "Landslides": {
+      "min": 0.0,
+      "max": 16.0
+    },
+    "Watersheds": {
+      "min": 0.0,
+      "max": 16.0
+    },
+    "DeterioratingInfrastructure": {
+      "min": 0.0,
+      "max": 17.0
+    },
+    "PopulationScore": {
+      "min": 0.0,
+      "max": 18.0
+    },
+    "WetlandLoss": {
+      "min": 0.0,
+      "max": 19.0
+    },
+    "InadequatePlanning": {
+      "min": 0.0,
+      "max": 16.0
+    },
+    "PoliticalFactors": {
+      "min": 0.0,
+      "max": 16.0
+    },
+    "FloodProbability": {
+      "min": 0.285,
+      "max": 0.725
+    }
+  },
+  "decision": "Target requires manual confirmation before training."
+}

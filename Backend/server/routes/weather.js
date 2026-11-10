@@ -55,10 +55,18 @@ router.get('/points', async (_request, response, next) => {
         const data = await weatherResponse.json()
         return {
           ...hub,
-          temperature: Math.round(data.main.temp),
+          temperature: Math.round(data.main.temp * 10) / 10,
+          feelsLike: Math.round(data.main.feels_like * 10) / 10,
           humidity: data.main.humidity,
+          pressure: data.main.pressure,
           windSpeed: Math.round((data.wind.speed || 0) * 3.6),
+          windDirection: data.wind.deg ?? null,
+          windGust: data.wind.gust ? Math.round(data.wind.gust * 3.6) : 0,
+          rainfall1h: data.rain?.['1h'] || 0,
+          cloudCover: data.clouds?.all ?? 0,
+          visibility: data.visibility ?? null,
           condition: data.weather?.[0]?.description || 'Unknown',
+          observedAt: data.dt ? new Date(data.dt * 1000).toISOString() : null,
         }
       }),
     )

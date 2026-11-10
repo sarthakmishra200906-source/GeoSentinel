@@ -8,10 +8,11 @@ export function errorHandler(error, request, response, next) {
     return
   }
 
-  console.error(error)
+  console.error({ requestId: request.id, error })
   const statusCode =
     error.statusCode || (error.name === 'ValidationError' || error.name === 'CastError' ? 400 : 500)
   response.status(statusCode).json({
     error: statusCode === 500 ? 'Internal server error' : error.message,
+    requestId: request.id,
   })
 }

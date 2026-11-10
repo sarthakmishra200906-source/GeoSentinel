@@ -11,6 +11,8 @@ export default class Register extends Component {
     age: '',
     gender: 'Other',
     address: '',
+    accountType: 'user',
+    governmentIdReference: '',
     error: '',
     isSubmitting: false,
   }
@@ -18,12 +20,12 @@ export default class Register extends Component {
   submit = async (event) => {
     event.preventDefault()
     this.setState({ error: '', isSubmitting: true })
-    const { name, email, phone, password, age, gender, address } = this.state
+    const { name, email, phone, password, age, gender, address, accountType, governmentIdReference } = this.state
     try {
       const response = await fetch(`${API_URL}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, phone, password, age: Number(age), gender, address }),
+        body: JSON.stringify({ name, email, phone, password, age: Number(age), gender, address, accountType, governmentIdReference }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to create your account')
@@ -58,6 +60,18 @@ export default class Register extends Component {
         </select>
         <label htmlFor="register-address">Address</label>
         <textarea id="register-address" rows="3" value={this.state.address} onChange={this.update('address')} required />
+        <label htmlFor="register-account-type">Account type</label>
+        <select id="register-account-type" value={this.state.accountType} onChange={this.update('accountType')}>
+          <option value="user">User</option>
+          <option value="admin">Admin request (requires approval)</option>
+        </select>
+        {this.state.accountType === 'admin' && (
+          <>
+            <label htmlFor="register-government-id">Government ID reference</label>
+            <input id="register-government-id" type="text" value={this.state.governmentIdReference} onChange={this.update('governmentIdReference')} required />
+            <p className="form-note">Your account remains a normal user until an authorized administrator approves this request.</p>
+          </>
+        )}
         <button className="form-submit" type="submit" disabled={this.state.isSubmitting}>
           {this.state.isSubmitting ? 'Creating account…' : 'Create account'}
         </button>

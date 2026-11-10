@@ -121,6 +121,25 @@
   height: 1px !important;
 }
 
+.rescue-center-pin {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 3px solid #fff;
+  border-radius: 50% 50% 50% 0;
+  color: #fff;
+  background: #2563eb;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.45);
+  font-size: 1.25rem;
+  font-weight: 800;
+  transform: rotate(-45deg);
+}
+
+.rescue-center-pin::first-letter {
+  transform: rotate(45deg);
+}
+
 .weather-stamp {
   display: flex;
   width: max-content;
@@ -135,6 +154,75 @@
   font-size: 0.7rem;
   line-height: 1.2;
   pointer-events: auto;
+}
+
+.weather-stamp i {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -2px 0 0 -3px;
+  border: 2px solid var(--weather-color);
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--weather-color) 25%, transparent);
+}
+
+.weather-stamp small {
+  color: var(--weather-color);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.weather-status {
+  position: absolute;
+  bottom: 18px;
+  left: 18px;
+  z-index: 600;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.78);
+  font-size: 0.75rem;
+  pointer-events: none;
+}
+
+.weather-animation {
+  position: absolute;
+  inset: 0;
+  z-index: 450;
+  pointer-events: none;
+}
+
+.weather-animation-rain {
+  opacity: 0.42;
+  background-image: repeating-linear-gradient(
+    105deg,
+    transparent 0,
+    transparent 18px,
+    rgba(125, 211, 252, 0.75) 19px,
+    transparent 21px,
+    transparent 42px
+  );
+  background-size: 84px 84px;
+  animation: rain-fall 0.8s linear infinite;
+}
+
+.weather-animation-heat {
+  opacity: 0.26;
+  background: radial-gradient(circle at 30% 40%, rgba(239, 68, 68, 0.7), transparent 28%),
+    radial-gradient(circle at 70% 65%, rgba(249, 115, 22, 0.65), transparent 32%);
+  mix-blend-mode: screen;
+  animation: heat-pulse 3s ease-in-out infinite alternate;
+}
+
+@keyframes rain-fall {
+  from { background-position: 0 -84px; }
+  to { background-position: 84px 84px; }
+}
+
+@keyframes heat-pulse {
+  from { opacity: 0.16; transform: scale(1); }
+  to { opacity: 0.34; transform: scale(1.05); }
 }
 
 .weather-stamp strong {

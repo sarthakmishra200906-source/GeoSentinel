@@ -8,7 +8,7 @@ const layerLabels = {
   storms: 'Cyclone tracks',
 }
 
-export default function WeatherLayerControl({ activeLayers, onToggle }) {
+export default function WeatherLayerControl({ activeLayers, onToggle, satellite, onToggleSatellite }) {
   const [isExpanded, setIsExpanded] = React.useState(false)
 
   return (
@@ -24,6 +24,18 @@ export default function WeatherLayerControl({ activeLayers, onToggle }) {
       </button>
       <div className="weather-control-panel">
         <h2>Weather layers</h2>
+        <button
+          className={`weather-layer-toggle ${satellite ? 'is-active' : ''}`}
+          type="button"
+          aria-pressed={satellite}
+          onClick={onToggleSatellite}
+        >
+          <span>
+            <span className="weather-layer-icon" aria-hidden="true">🛰️</span>
+            Satellite base
+          </span>
+          <span className="weather-layer-state">{satellite ? 'On' : 'Off'}</span>
+        </button>
         {Object.entries(layerLabels).map(([layer, label]) => (
           <button
             className={`weather-layer-toggle ${activeLayers[layer] ? 'is-active' : ''}`}
