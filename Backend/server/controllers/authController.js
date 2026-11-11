@@ -30,17 +30,18 @@ export async function register(request, response, next) {
     }
 
     const requestedRole = body.accountType === 'admin' ? 'admin' : 'user'
-    if (requestedRole === 'admin' && typeof body.governmentIdReference !== 'string') {
+    const directAdminAccess = requestedRole === 'admin' && process.env.ALLOW_ADMIN_REGISTRATION === 'true'
+    if (requestedRole === 'admin' && !directAdminAccess && typeof body.governmentIdReference !== 'string') {
       response.status(400).json({ error: 'governmentIdReference is required for admin verification' })
       return
     }
 
     const user = await User.create({
       ...body,
-      role: requestedRole === 'admin' ? 'user' : 'user',
+      role: directAdminAccess ? 'admin' : 'user',
       password: await bcrypt.hash(body.password, 12),
     })
-    if (requestedRole === 'admin') {
+    if (requestedRole === 'admin' && !directAdminAccess) {
       await AdminVerification.create({
         user: user._id,
         governmentIdReference: body.governmentIdReference,
@@ -50,7 +51,7 @@ export async function register(request, response, next) {
     response.status(201).json({
       token,
       user: publicUser(user),
-      adminVerification: requestedRole === 'admin' ? 'pending' : null,
+      adminVerification: directAdminAccess ? 'approved-local' : requestedRole === 'admin' ? 'pending' : null,
     })
   } catch (error) {
     if (error.code === 11000) {

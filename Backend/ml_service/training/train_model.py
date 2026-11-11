@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
-ARCHIVE = ROOT / "train.csv.zip"
+ARCHIVE = ROOT / "data" / "kaggle" / "playground-series-s4e5.zip"
 MODEL_PATH = ROOT / "Backend" / "ml_service" / "model" / "flood-risk-baseline.json"
 TARGET = "FloodProbability"
 
@@ -60,9 +60,10 @@ def main() -> int:
     row_count = 0
     train_count = 0
     test_count = 0
+    feature_bounds: dict[str, dict[str, float]] = {}
 
     with zipfile.ZipFile(ARCHIVE) as archive:
-        csv_name = next(name for name in archive.namelist() if name.endswith(".csv"))
+        csv_name = next(name for name in archive.namelist() if Path(name).name == "train.csv")
         with archive.open(csv_name, "r") as compressed:
             reader = csv.DictReader((line.decode("utf-8-sig") for line in compressed))
             if not reader.fieldnames or TARGET not in reader.fieldnames:
@@ -74,6 +75,12 @@ def main() -> int:
             for row in reader:
                 row_count += 1
                 features = [float(row[name]) for name in feature_names]
+                for name, value in zip(feature_names, features):
+                    if name not in feature_bounds:
+                        feature_bounds[name] = {"min": value, "max": value}
+                    else:
+                        feature_bounds[name]["min"] = min(feature_bounds[name]["min"], value)
+                        feature_bounds[name]["max"] = max(feature_bounds[name]["max"], value)
                 values = [1.0, *features]
                 target = float(row[TARGET])
                 row_id = int(row["id"])
@@ -98,13 +105,14 @@ def main() -> int:
         absolute_errors.append(abs(error))
         tier_counts[risk_tier(prediction)] = tier_counts.get(risk_tier(prediction), 0) + 1
 
-    model_version = "flood-risk-baseline-2026-11-10"
+    model_version = "flood-risk-baseline-2026-11-11"
     metadata = {
         "model_version": model_version,
         "algorithm": "ordinary_least_squares",
         "target": TARGET,
         "features": feature_names,
         "feature_units": {name: "dataset score; source units not specified" for name in feature_names},
+        "feature_bounds": feature_bounds,
         "training_rows": train_count,
         "test_rows": test_count,
         "dataset_rows": row_count,
@@ -115,6 +123,7 @@ def main() -> int:
         },
         "prediction_tiers": tier_counts,
         "dataset_sha256": hashlib.sha256(ARCHIVE.read_bytes()).hexdigest(),
+        "dataset_source": "Kaggle Playground Series S4E5 competition archive",
         "status": "baseline; not a calibrated operational alert model",
         "coefficients": coefficients,
     }

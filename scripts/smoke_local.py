@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -49,6 +50,26 @@ def main() -> int:
     except (OSError, KeyError, json.JSONDecodeError):
         valid_features = None
 
+    registration_body = {
+        "name": "Local Smoke User",
+        "email": f"smoke-{int(time.time())}@example.com",
+        "phone": f"9{int(time.time()) % 1000000000:09d}",
+        "password": "LocalSmokePassword!123",
+        "age": 30,
+        "gender": "Other",
+        "address": "Local smoke test",
+    }
+    registration = request(
+        f"{BACKEND}/api/auth/register",
+        method="POST",
+        body=json.dumps(registration_body).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    ordinary_token = None
+    if registration[0] == 201:
+        ordinary_token = json.loads(registration[2]).get("token")
+    ordinary_headers = {"Authorization": f"Bearer {ordinary_token}"} if ordinary_token else {}
+
     results = [
         check(
             "frontend responds",
@@ -73,6 +94,56 @@ def main() -> int:
         check(
             "protected route rejects missing auth",
             lambda: request(f"{BACKEND}/api/auth/me")[0] == 401,
+        ),
+        check(
+            "admin mutations reject missing auth",
+            lambda: request(
+                f"{BACKEND}/api/admin/guidelines",
+                method="POST",
+                body=b"{}",
+                headers={"Content-Type": "application/json"},
+            )[0]
+            == 401,
+        ),
+        check(
+            "chat rejects missing auth",
+            lambda: request(
+                f"{BACKEND}/api/chat/message",
+                method="POST",
+                body=b'{"message":"Where is the nearest shelter?"}',
+                headers={"Content-Type": "application/json"},
+            )[0]
+            == 401,
+        ),
+        check(
+            "rescue-center mutations reject missing auth",
+            lambda: request(
+                f"{BACKEND}/api/rescue-centers",
+                method="POST",
+                body=b"{}",
+                headers={"Content-Type": "application/json"},
+            )[0]
+            == 401,
+        ),
+        check(
+            "ordinary user registration works for authorization test",
+            lambda: registration[0] == 201 and bool(ordinary_token),
+        ),
+        check(
+            "ordinary users cannot access admin guidelines",
+            lambda: ordinary_token is not None
+            and request(f"{BACKEND}/api/admin/guidelines", headers=ordinary_headers)[0] == 403,
+        ),
+        check(
+            "ordinary users cannot mutate rescue centers",
+            lambda: ordinary_token is not None
+            and request(
+                f"{BACKEND}/api/rescue-centers",
+                method="POST",
+                body=b"{}",
+                headers={**ordinary_headers, "Content-Type": "application/json"},
+            )[0]
+            == 403,
         ),
         check(
             "invalid report is rejected",

@@ -18,6 +18,44 @@ const cardContent = {
   },
 }
 
+class NotificationPanel extends Component {
+  state = { notifications: [], error: '' }
+
+  componentDidMount() {
+    fetch(`${API_URL}/notifications`, { headers: { Authorization: `Bearer ${this.props.token}` } })
+      .then(async (response) => {
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.error || 'Unable to load notifications')
+        this.setState({ notifications: data })
+      })
+      .catch((error) => this.setState({ error: error.message }))
+  }
+
+  markRead = async (notification) => {
+    await fetch(`${API_URL}/notifications/${notification._id}/read`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${this.props.token}` },
+    })
+    this.setState((state) => ({ notifications: state.notifications.map((item) => item._id === notification._id ? { ...item, read: true } : item) }))
+  }
+
+  render() {
+    return (
+      <div>
+        {this.state.notifications.map((notification) => (
+          <article key={notification._id}>
+            <strong>{notification.title}</strong> · {notification.severity}
+            <p>{notification.message}</p>
+            {!notification.read && <button type="button" onClick={() => this.markRead(notification)}>Mark read</button>}
+          </article>
+        ))}
+        {!this.state.notifications.length && !this.state.error && <p>No notifications.</p>}
+        {this.state.error && <p className="form-error">{this.state.error}</p>}
+      </div>
+    )
+  }
+}
+
 export default class Navbar extends Component {
   state = {
     isMenuOpen: false,
@@ -68,6 +106,14 @@ export default class Navbar extends Component {
       )
     }
 
+    if (activeCard === 'notifications') {
+      return (
+        <NavigationCard title="Notifications" onClose={this.closeCard}>
+          <NotificationPanel token={this.props.token} />
+        </NavigationCard>
+      )
+    }
+
     if (activeCard === 'admin') {
       return (
         <NavigationCard title="Admin dashboard" onClose={this.closeCard}>
@@ -106,8 +152,8 @@ export default class Navbar extends Component {
             <button className="menu-item" type="button" onClick={() => this.openCard('guideline')}>
               Guidelines
             </button>
-            <button className="menu-item" type="button" onClick={() => this.openCard('help')}>
-              Help
+            <button className="menu-item emergency-menu-item" type="button" onClick={() => this.openCard('help')}>
+              <span aria-hidden="true">🚨</span> Help now
             </button>
             {user ? (
               <>
@@ -118,6 +164,9 @@ export default class Navbar extends Component {
                 )}
                 <button className="menu-item" type="button" onClick={() => this.openCard('ai')}>
                   AI assistant
+                </button>
+                <button className="menu-item" type="button" onClick={() => this.openCard('notifications')}>
+                  Notifications
                 </button>
                 <button className="menu-item" type="button" onClick={onLogout}>
                   Log out
@@ -212,7 +261,10 @@ class HelpPanel extends Component {
   render() {
     return (
       <form className="auth-form help-form" onSubmit={this.submit}>
-        <p>For immediate danger, contact local emergency services first.</p>
+        <div className="emergency-banner" role="alert">
+          <strong>Emergency help</strong>
+          <span>For immediate danger, contact local emergency services first, then submit your location and request here.</span>
+        </div>
         <button className="location-button" type="button" onClick={this.getCurrentLocation} disabled={this.state.isLocating}>
           {this.state.isLocating ? 'Finding location…' : 'Use current location'}
         </button>
@@ -248,7 +300,7 @@ class HelpPanel extends Component {
 }
 
 class AiPanel extends Component {
-  state = { message: '', response: '', error: '', isSending: false }
+  state = { message: '', response: null, error: '', isSending: false }
 
   submit = async (event) => {
     event.preventDefault()
@@ -267,18 +319,19 @@ class AiPanel extends Component {
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.message || data.error || 'Unable to contact the AI assistant')
-      this.setState({ response: data.data.aiResponse, message: '' })
+      this.setState({ response: data.data, message: '' })
     } catch (error) {
       this.setState({ error: error.message })
     } finally {
       this.setState({ isSending: false })
     }
+
   }
 
   render() {
     return (
       <form className="auth-form" onSubmit={this.submit}>
-        <p>Ask the assistant to record an emergency update.</p>
+        <p>Ask a question. Answers are generated only from approved government guidance; contact local emergency services for immediate danger.</p>
         <label htmlFor="ai-message">Message</label>
         <textarea
           id="ai-message"
@@ -290,7 +343,22 @@ class AiPanel extends Component {
         <button className="form-submit" type="submit" disabled={this.state.isSending}>
           {this.state.isSending ? 'Sending…' : 'Send message'}
         </button>
-        {this.state.response && <p className="form-success">{this.state.response}</p>}
+        {this.state.response && (
+          <div className={this.state.response.status === 'GROUNDED' ? 'form-success' : 'form-error'} role="status">
+            <strong>{this.state.response.status}</strong>
+            <p>{this.state.response.answer || this.state.response.warnings?.[0] || 'No supported answer is available.'}</p>
+            {this.state.response.sources?.length > 0 && (
+              <ul>
+                {this.state.response.sources.map((source) => (
+                  <li key={`${source.documentId}-${source.page || source.section}`}>
+                    <a href={source.officialUrl} target="_blank" rel="noreferrer">{source.title}</a>
+                    {source.page ? `, page ${source.page}` : ''}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
         {this.state.error && <p className="form-error">{this.state.error}</p>}
       </form>
     )

@@ -25,8 +25,22 @@ document-review process are configured.
   optional image uploads, and user ownership for signed-in reports.
 - Added local image storage with file-size/type limits, JPEG compression, and MongoDB
   image path metadata so binary files are not stored in documents.
+- Added admin audit events for report, verification, guideline, and rescue-center
+  mutations, including actor, status transition, reason, changes, and request ID.
+- Added verified government-domain document ingestion for text, Markdown, and
+  extractable PDFs with checksum deduplication and page-aware chunks.
+- Added an optional OpenAI-compatible grounded-answer boundary. It fails explicitly
+  when the provider is unavailable and never answers from unapproved context.
+- Added rescue-center editing with optimistic version checks, duplicate detection,
+  search, last-verified details, and directions links.
+- Windy Map Forecast is the primary interactive weather map. OpenWeather is an
+  optional backend enhancement for exact weather readings, regional markers,
+  weather tiles, and ML feature enrichment; the map does not depend on it.
 - Added server-side OpenWeather tile proxying, regional weather point readings, and
   optional cyclone track configuration.
+- Added Express-to-FastAPI flood prediction proxying, explicit simulation mode,
+  cached basic safety answers, provider fallback, admin health checks, and
+  user notifications.
 
 ## Frontend features
 
@@ -45,6 +59,24 @@ Never commit real API keys or secrets. The OpenWeather key belongs only in the b
 OPENWEATHER_API_KEY=your-openweather-api-key
 ```
 
+The frontend uses Windy as the primary map provider. Set
+`Frontend\Resq-AI\.env.local` from the frontend example and provide
+`VITE_WINDY_MAP_FORECAST_KEY`. The optional
+`VITE_WINDY_POINT_FORECAST_KEY` is reserved for point-forecast integrations.
+OpenWeather may remain unset when only the Windy map is needed; weather-
+dependent backend features will report unavailable instead of fabricating data.
+
+Grounded chat is retrieval-only until an approved provider is configured. To enable
+Google Gemini, set `GOOGLE_GEMINI_API_KEY` and optionally `GOOGLE_GEMINI_MODEL`.
+Alternatively, set `LLM_API_URL`, `LLM_API_KEY`, `LLM_MODEL`,
+`LLM_TIMEOUT_MS`, and `LLM_MAX_TOKENS` in the backend environment. The backend sends
+only redacted, approved chunks to that endpoint and returns an explicit provider
+status when it is unavailable.
+
+For local testing only, `ALLOW_ADMIN_REGISTRATION=true` grants accounts selecting
+the admin account type immediate admin access. Set it to `false` before hosting;
+production admin approval should be restored.
+
 The optional `WEATHER_STORM_TRACKS_JSON` value accepts an array such as:
 
 ```env
@@ -54,6 +86,11 @@ WEATHER_STORM_TRACKS_JSON=[{"id":"storm-1","name":"Example","coordinates":[[20,8
 Local help-request images are written to `Backend\server\uploads` during development.
 Only the generated file path and metadata are stored in MongoDB. For production,
 replace this local adapter with a cloud object-storage adapter.
+
+Guideline uploads are limited to government-domain sources and are held in `pending`
+status until an admin approves them. PDF uploads use `pdf-parse` for text extraction;
+scanned/image-only PDFs are rejected as having no extractable text. Production still
+requires malware scanning and durable object storage before accepting untrusted files.
 
 ## Project layout
 
@@ -97,6 +134,10 @@ Authentication endpoints:
 - `GET /api/weather/points` for regional weather readings
 - `GET /api/weather/tiles/:layer/:z/:x/:y.png` for proxied weather tiles
 - `GET /api/weather/storms` for configured cyclone tracks
+- `POST /api/prediction` with `{ "latitude": 28.6, "longitude": 77.2 }`
+- `POST /api/prediction/simulate` for admins; always returns `SIMULATED`
+- `GET /api/notifications` for authenticated users
+- `POST /api/notifications` for admins
 
 ### ML service
 
@@ -106,7 +147,8 @@ python -m pip install -r requirements.txt
 python -m uvicorn main:app --reload --port 8000
 ```
 
-Train the local, non-operational baseline from the verified Kaggle archive:
+Train the local, non-operational baseline from the verified Kaggle archive
+(`data\kaggle\playground-series-s4e5.zip`):
 
 ```powershell
 python Backend\ml_service\training\train_model.py

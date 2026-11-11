@@ -11,6 +11,8 @@ import chatRoutes from './routes/chatRoutes.js'
 import reportsRoutes from './routes/reports.js'
 import sosRoutes from './routes/sosRoutes.js'
 import weatherRoutes from './routes/weather.js'
+import predictionRoutes from './routes/prediction.js'
+import notificationRoutes from './routes/notifications.js'
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js'
 
 const app = express()
@@ -72,6 +74,8 @@ app.use('/api/auth', authRoutes)
 app.use('/api/chat', chatRoutes)
 app.use('/api/sos', sosRoutes)
 app.use('/api/weather', weatherRoutes)
+app.use('/api/prediction', predictionRoutes)
+app.use('/api/notifications', notificationRoutes)
 app.use(notFoundHandler)
 app.use(errorHandler)
 

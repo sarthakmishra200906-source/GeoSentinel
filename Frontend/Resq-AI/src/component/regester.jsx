@@ -63,13 +63,13 @@ export default class Register extends Component {
         <label htmlFor="register-account-type">Account type</label>
         <select id="register-account-type" value={this.state.accountType} onChange={this.update('accountType')}>
           <option value="user">User</option>
-          <option value="admin">Admin request (requires approval)</option>
+          <option value="admin">Admin access (local testing)</option>
         </select>
         {this.state.accountType === 'admin' && (
           <>
             <label htmlFor="register-government-id">Government ID reference</label>
-            <input id="register-government-id" type="text" value={this.state.governmentIdReference} onChange={this.update('governmentIdReference')} required />
-            <p className="form-note">Your account remains a normal user until an authorized administrator approves this request.</p>
+            <input id="register-government-id" type="text" value={this.state.governmentIdReference} onChange={this.update('governmentIdReference')} />
+            <p className="form-note">Local testing currently grants admin access immediately. Disable this before hosting.</p>
           </>
         )}
         <button className="form-submit" type="submit" disabled={this.state.isSubmitting}>

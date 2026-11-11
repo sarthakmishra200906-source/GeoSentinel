@@ -1,7 +1,11 @@
 train.csv
 train.csv.zip
+data/kaggle/*.zip
 data/processed/
 Backend/server/.env
+Frontend/Resq-AI/.env
+Frontend/Resq-AI/.env.local
+!Frontend/Resq-AI/.env.example
 Backend/server/node_modules/
 Backend/server/uploads/*
 !Backend/server/uploads/.gitkeep

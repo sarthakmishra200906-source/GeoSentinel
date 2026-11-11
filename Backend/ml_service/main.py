@@ -1,4 +1,6 @@
 import json
+from datetime import datetime, timezone
+import math
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -39,19 +41,64 @@ def predict(request: PredictionRequest) -> dict[str, object]:
     expected = model["features"]
     if set(request.features) != set(expected):
         raise HTTPException(status_code=422, detail="Feature names do not match model schema")
-    if any(not isinstance(value, (int, float)) for value in request.features.values()):
+    if any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in request.features.values()):
         raise HTTPException(status_code=422, detail="All feature values must be numeric")
+    bounds = model.get("feature_bounds", {})
+    out_of_range = [
+        name
+        for name, value in request.features.items()
+        if name in bounds and (value < bounds[name]["min"] or value > bounds[name]["max"])
+    ]
+    timestamp = None
+    if request.feature_timestamp:
+        try:
+            timestamp = datetime.fromisoformat(request.feature_timestamp.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail="feature_timestamp must be ISO-8601") from error
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        if timestamp > datetime.now(timezone.utc):
+            raise HTTPException(status_code=422, detail="feature_timestamp cannot be in the future")
+    if out_of_range:
+        unavailable = {
+            "probability": None,
+            "risk_tier": None,
+            "status": "UNAVAILABLE",
+            "model_version": model["model_version"],
+            "feature_timestamp": request.feature_timestamp,
+            "input_status": "OUT_OF_RANGE",
+            "warnings": [f"Out-of-range features: {', '.join(out_of_range)}"],
+        }
+        unavailable.update({
+            "riskTier": None,
+            "modelVersion": unavailable["model_version"],
+            "featureTimestamp": unavailable["feature_timestamp"],
+            "inputStatus": unavailable["input_status"],
+        })
+        return unavailable
     values = [1.0] + [request.features[name] for name in expected]
     probability = max(
         0.0,
         min(1.0, sum(a * b for a, b in zip(model["coefficients"], values))),
     )
-    return {
+    status = "SIMULATED"
+    warnings = ["Baseline model is not calibrated for operational alerts."]
+    if timestamp and (datetime.now(timezone.utc) - timestamp).total_seconds() > 24 * 60 * 60:
+        status = "STALE"
+        warnings.append("Feature data is older than 24 hours.")
+    result = {
         "probability": probability,
         "risk_tier": classify(probability),
-        "status": "SIMULATED",
+        "status": status,
         "model_version": model["model_version"],
         "feature_timestamp": request.feature_timestamp,
         "input_status": "DATASET_FEATURES",
-        "warnings": ["Baseline model is not calibrated for operational alerts."],
+        "warnings": warnings,
     }
+    result.update({
+        "riskTier": result["risk_tier"],
+        "modelVersion": result["model_version"],
+        "featureTimestamp": result["feature_timestamp"],
+        "inputStatus": result["input_status"],
+    })
+    return result

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Windy Forecast</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.4.0/dist/leaflet.css" />
+    <style>
+      html, body, #windy {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+    </style>
+    <script src="https://unpkg.com/leaflet@1.4.0/dist/leaflet.js"></script>
+    <script src="https://api.windy.com/assets/map-forecast/libBoot.js"></script>
+  </head>
+  <body>
+    <div id="windy"></div>
+    <script>
+      const key = new URLSearchParams(window.location.search).get('key')
+      if (!key) {
+        document.body.textContent = 'Windy Map Forecast key is not configured.'
+      } else {
+        windyInit({
+          key,
+          lat: 20.5937,
+          lon: 78.9629,
+          zoom: 5,
+          overlay: 'wind',
+          level: 'surface',
+          product: 'gfs',
+        }, function(windyAPI) {
+          const emitPicker = (params) => {
+            window.parent.postMessage({
+              type: 'windy-picker',
+              lat: params.lat,
+              lon: params.lon,
+              values: Array.isArray(params.values) ? params.values : [],
+              overlay: params.overlay || null
+            }, window.location.origin)
+          }
+          windyAPI.picker.on('pickerOpened', emitPicker)
+          windyAPI.picker.on('pickerMoved', emitPicker)
+          windyAPI.map.on('click', (event) => {
+            const point = { lat: event.latlng.lat, lon: event.latlng.lng }
+            window.parent.postMessage({ type: 'windy-picker', ...point, values: [], overlay: null }, window.location.origin)
+            windyAPI.picker.open(point)
+          })
+          window.addEventListener('message', (event) => {
+            if (event.origin !== window.location.origin || event.data?.type !== 'open-windy-picker') return
+            windyAPI.picker.open({ lat: event.data.lat, lon: event.data.lon })
+            windyAPI.map.setView([event.data.lat, event.data.lon], Math.max(windyAPI.map.getZoom(), 8))
+          })
+        })
+      }
+    </script>
+  </body>
+</html>

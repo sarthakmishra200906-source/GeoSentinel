@@ -2,7 +2,7 @@ import React from 'react'
 
 const layerLabels = {
   temperature: 'Temperature',
-  rain: 'Rain radar',
+  rain: 'Precipitation',
   wind: 'Wind',
   clouds: 'Satellite clouds',
   storms: 'Cyclone tracks',
