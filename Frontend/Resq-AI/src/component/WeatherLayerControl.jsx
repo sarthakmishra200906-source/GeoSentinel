@@ -4,7 +4,6 @@ const layerLabels = {
   temperature: 'Temperature',
   rain: 'Precipitation',
   wind: 'Wind',
-  clouds: 'Satellite clouds',
   storms: 'Cyclone tracks',
 }
 
@@ -46,7 +45,7 @@ export default function WeatherLayerControl({ activeLayers, onToggle, satellite,
           >
             <span>
               <span className="weather-layer-icon" aria-hidden="true">
-                {layer === 'temperature' ? '🌡️' : layer === 'rain' ? '🌧️' : layer === 'wind' ? '💨' : layer === 'clouds' ? '☁️' : '🌀'}
+                {layer === 'temperature' ? '🌡️' : layer === 'rain' ? '🌧️' : layer === 'wind' ? '💨' : '🌀'}
               </span>
               {label}
             </span>

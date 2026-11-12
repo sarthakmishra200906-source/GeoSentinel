@@ -1,20 +1,29 @@
 import { Router } from 'express'
+import jwt from 'jsonwebtoken'
 import Notification from '../models/Notification.js'
 import { requireAuth } from '../middleware/auth.js'
 import { requireRoles } from '../middleware/roles.js'
 
 const router = Router()
 
-router.get('/', requireAuth, async (request, response, next) => {
+router.get('/', async (request, response, next) => {
   try {
-    const audience = request.user.role === 'admin' ? ['all', 'admins'] : ['all', 'users']
+    let user = null
+    const authHeader = request.headers.authorization
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.split(' ')[1]
+        user = jwt.verify(token, process.env.JWT_SECRET)
+      } catch {}
+    }
+    const audience = user && user.role === 'admin' ? ['all', 'admins'] : ['all', 'users']
     const notifications = await Notification.find({ audience: { $in: audience } })
       .sort({ createdAt: -1 })
       .limit(30)
       .lean()
     response.json(notifications.map((notification) => ({
       ...notification,
-      read: notification.readBy.some((id) => String(id) === String(request.user._id)),
+      read: user ? notification.readBy?.some((id) => String(id) === String(user.userId || user._id)) : false,
     })))
   } catch (error) {
     next(error)

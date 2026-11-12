@@ -22,7 +22,7 @@ SERVICES = [
     (
         "frontend",
         ROOT / "Frontend" / "Resq-AI",
-        [NPM, "run", "dev", "--", "--host", "127.0.0.1"],
+        [NPM, "run", "dev", "--", "--host", "localhost"],
     ),
 ]
 
@@ -67,7 +67,7 @@ def main() -> int:
             processes.append((name, process))
 
         print("\nLocal services started:")
-        print("  Frontend: http://127.0.0.1:5173")
+        print("  Frontend: http://localhost:5173/GeoSentinel/")
         print("  Backend:  http://127.0.0.1:5000/api/health")
         print("  ML:       http://127.0.0.1:8000/health")
         print("Press Ctrl+C to stop all services.\n")

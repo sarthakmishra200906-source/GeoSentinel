@@ -11,6 +11,106 @@
         height: 100%;
         margin: 0;
         overflow: hidden;
+        background: #0f172a;
+      }
+
+      /* ── Pure Rain Mode: completely hide wind particle canvas ── */
+      #windy.pure-rain-mode canvas {
+        display: none !important;
+        opacity: 0 !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+      }
+
+      .cyclone-marker-icon {
+        background: transparent !important;
+        border: none !important;
+      }
+      .cyclone-pin {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        filter: drop-shadow(0 2px 6px rgba(0,0,0,0.7));
+      }
+      .cyclone-spin {
+        display: inline-block;
+        font-size: 28px;
+        line-height: 1;
+        animation: spin-cyclone 2.5s linear infinite;
+      }
+      @keyframes spin-cyclone {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(-360deg); }
+      }
+      .cyclone-label {
+        margin-top: 3px;
+        padding: 2px 7px;
+        background: rgba(220, 38, 38, 0.95);
+        color: #fff;
+        font-size: 11px;
+        font-weight: 700;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        border-radius: 4px;
+        white-space: nowrap;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.6);
+        pointer-events: none;
+      }
+      .cyclone-popup-content {
+        min-width: 210px;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #1e293b;
+      }
+      .cyclone-popup-header {
+        font-size: 15px;
+        font-weight: 700;
+        color: #dc2626;
+        border-bottom: 1px solid #fee2e2;
+        padding-bottom: 4px;
+        margin-bottom: 6px;
+      }
+      .cyclone-popup-row {
+        font-size: 12px;
+        line-height: 1.5;
+        margin-bottom: 3px;
+      }
+      .cyclone-popup-threat {
+        margin-top: 6px;
+        padding: 4px 6px;
+        background: #fff7ed;
+        border-left: 3px solid #ea580c;
+        color: #9a3412;
+        font-size: 11px;
+        line-height: 1.4;
+      }
+      #layer-indicator {
+        position: fixed;
+        bottom: 24px;
+        left: 24px;
+        z-index: 1000;
+        background: rgba(15, 23, 42, 0.92);
+        color: #f8fafc;
+        padding: 8px 16px;
+        border-radius: 999px;
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 12px;
+        font-weight: 700;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        backdrop-filter: blur(8px);
+        pointer-events: none;
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .rain-legend-bar {
+        display: inline-block;
+        width: 70px;
+        height: 7px;
+        border-radius: 3px;
+        background: linear-gradient(to right, #bae6fd, #38bdf8, #0284c7, #1d4ed8, #312e81);
       }
     </style>
     <script src="https://unpkg.com/leaflet@1.4.0/dist/leaflet.js"></script>
@@ -18,11 +118,244 @@
   </head>
   <body>
     <div id="windy"></div>
+    <div id="layer-indicator">
+      <span>💨 Wind Streamlines Active</span>
+    </div>
+
     <script>
       const key = new URLSearchParams(window.location.search).get('key')
       if (!key) {
         document.body.textContent = 'Windy Map Forecast key is not configured.'
       } else {
+        const pendingMessages = []
+        let windyInstance = null
+        let satelliteLayer = null
+        let radarLayer = null
+        let cycloneLayerGroup = null
+        let cycloneMarkersMap = new Map()
+
+        function updateIndicator(html, borderColor) {
+          const el = document.getElementById('layer-indicator')
+          if (el) {
+            el.innerHTML = html
+            el.style.borderColor = borderColor || 'rgba(255, 255, 255, 0.2)'
+          }
+        }
+
+        function setupLayers(map) {
+          if (!cycloneLayerGroup) {
+            cycloneLayerGroup = L.layerGroup().addTo(map)
+          }
+        }
+
+        function setSatellite(enabled) {
+          if (!windyInstance || !windyInstance.map) return
+          if (enabled) {
+            if (!satelliteLayer) {
+              satelliteLayer = L.tileLayer(
+                'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                {
+                  attribution: 'Tiles &copy; Esri',
+                  maxZoom: 19,
+                  opacity: 0.88,
+                  zIndex: 2,
+                }
+              )
+            }
+            if (!windyInstance.map.hasLayer(satelliteLayer)) {
+              satelliteLayer.addTo(windyInstance.map)
+            }
+          } else {
+            if (satelliteLayer && windyInstance.map.hasLayer(satelliteLayer)) {
+              windyInstance.map.removeLayer(satelliteLayer)
+            }
+          }
+        }
+
+        function setRadar(enabled, tileUrl) {
+          if (!windyInstance || !windyInstance.map) return
+          // RainViewer Universal Blue radar scheme (2) for standard weather map blue precipitation
+          const url = tileUrl || 'https://tilecache.rainviewer.com/v2/radar/nowcast_latest/256/{z}/{x}/{y}/2/1_1.png'
+          if (enabled) {
+            if (!radarLayer) {
+              radarLayer = L.tileLayer(url, {
+                opacity: 0.82,
+                zIndex: 400,
+                attribution: 'Rain Radar &copy; RainViewer',
+              })
+            }
+            if (!windyInstance.map.hasLayer(radarLayer)) {
+              radarLayer.addTo(windyInstance.map)
+            }
+          } else {
+            if (radarLayer && windyInstance.map.hasLayer(radarLayer)) {
+              windyInstance.map.removeLayer(radarLayer)
+            }
+          }
+        }
+
+        function renderCyclones(storms, enabled) {
+          if (!windyInstance || !windyInstance.map || !cycloneLayerGroup) return
+          cycloneLayerGroup.clearLayers()
+          cycloneMarkersMap.clear()
+
+          if (!enabled || !Array.isArray(storms) || storms.length === 0) return
+
+          storms.forEach((storm) => {
+            if (!storm.coordinates || !storm.coordinates.length) return
+            const eye = storm.coordinates[0]
+            if (!eye || !Array.isArray(eye) || eye.length < 2) return
+
+            // 1. Forecast / past track polyline
+            if (storm.coordinates.length > 1) {
+              const poly = L.polyline(storm.coordinates, {
+                color: '#ef4444',
+                weight: 4,
+                dashArray: '8, 6',
+                opacity: 0.88,
+              })
+              poly.addTo(cycloneLayerGroup)
+            }
+
+            // 2. Warning zone circle (orange)
+            const warningRadius = (storm.radiiKm?.warning || 150) * 1000
+            L.circle(eye, {
+              radius: warningRadius,
+              color: '#f97316',
+              fillColor: '#ea580c',
+              fillOpacity: 0.16,
+              weight: 2,
+              dashArray: '5, 5',
+            }).addTo(cycloneLayerGroup)
+
+            // 3. Danger core circle (red)
+            const dangerRadius = (storm.radiiKm?.danger || 75) * 1000
+            L.circle(eye, {
+              radius: dangerRadius,
+              color: '#dc2626',
+              fillColor: '#b91c1c',
+              fillOpacity: 0.28,
+              weight: 2,
+            }).addTo(cycloneLayerGroup)
+
+            // 4. Animated spinning cyclone eye icon
+            const cleanName = (storm.name || 'Cyclone').replace(/^🌀\s*/, '')
+            const icon = L.divIcon({
+              className: 'cyclone-marker-icon',
+              html: `<div class="cyclone-pin" title="${cleanName}"><span class="cyclone-spin">🌀</span><span class="cyclone-label">${cleanName}</span></div>`,
+              iconSize: [40, 40],
+              iconAnchor: [20, 20],
+            })
+
+            const marker = L.marker(eye, { icon }).addTo(cycloneLayerGroup)
+
+            const popupContent = `
+              <div class="cyclone-popup-content">
+                <div class="cyclone-popup-header">🌀 ${cleanName}</div>
+                <div class="cyclone-popup-row"><b>Category:</b> ${storm.category || 'Tropical Storm'}</div>
+                <div class="cyclone-popup-row"><b>Max Wind:</b> ${storm.maxWindKmh || '—'} km/h</div>
+                ${storm.pressureHpa ? `<div class="cyclone-popup-row"><b>Central Pressure:</b> ${storm.pressureHpa} hPa</div>` : ''}
+                ${storm.basin ? `<div class="cyclone-popup-row"><b>Basin:</b> ${storm.basin}</div>` : ''}
+                <div class="cyclone-popup-row"><b>Eye:</b> ${eye[0].toFixed(2)}°, ${eye[1].toFixed(2)}°</div>
+                ${storm.landfallRisk && storm.landfallRisk.length ? `
+                  <div class="cyclone-popup-threat">
+                    <strong>Threatened Areas:</strong><br />
+                    ${storm.landfallRisk.join(', ')}
+                  </div>
+                ` : ''}
+              </div>
+            `
+            marker.bindPopup(popupContent)
+            cycloneMarkersMap.set(storm.id, marker)
+          })
+        }
+
+        function processCommand(data) {
+          if (!windyInstance) {
+            pendingMessages.push(data)
+            return
+          }
+
+          const windyEl = document.getElementById('windy')
+
+          if (data.type === 'change-windy-overlay' && data.overlay) {
+            try {
+              const target = data.overlay
+              console.log('[Windy] Changing overlay to:', target)
+
+              if (target === 'wind') {
+                // Disable pure-rain mode and restore wind canvas
+                if (windyEl) windyEl.classList.remove('pure-rain-mode')
+                setRadar(false)
+                windyInstance.store.set('overlay', 'wind')
+                updateIndicator('<span>💨 Wind Particles Active (Velocity Streamlines)</span>', '#38bdf8')
+              } else if (target === 'temp') {
+                // Temperature heat map
+                if (windyEl) windyEl.classList.remove('pure-rain-mode')
+                setRadar(false)
+                windyInstance.store.set('overlay', 'temp')
+                updateIndicator('<span>🌡️ Heat Map Active (Cool → Warm → Hot)</span>', '#f97316')
+              } else if (target === 'rain') {
+                // Pure rain mode: hide wind animation canvas completely
+                if (windyEl) windyEl.classList.add('pure-rain-mode')
+                // Turn on standard blue precipitation radar
+                setRadar(true, data.radarTileUrl)
+                updateIndicator('<span>🌧️ Pure Rain Radar (Standard Blue):</span> <span class="rain-legend-bar"></span> <span>Light → Heavy</span>', '#0284c7')
+              } else if (target === 'clouds') {
+                if (windyEl) windyEl.classList.remove('pure-rain-mode')
+                setRadar(false)
+                windyInstance.store.set('overlay', 'clouds')
+                updateIndicator('<span>☁️ Cloud Cover Active</span>', '#94a3b8')
+              } else {
+                if (windyEl) windyEl.classList.remove('pure-rain-mode')
+                setRadar(false)
+                windyInstance.store.set('overlay', target)
+                updateIndicator(`<span>🌐 ${target.toUpperCase()} Layer</span>`, '#38bdf8')
+              }
+
+              if (windyInstance.broadcast && typeof windyInstance.broadcast.fire === 'function') {
+                windyInstance.broadcast.fire('paramsChanged')
+              }
+            } catch (err) {
+              console.error('Windy overlay change error:', err)
+            }
+          } else if (data.type === 'toggle-satellite') {
+            setSatellite(Boolean(data.enabled))
+          } else if (data.type === 'toggle-radar') {
+            setRadar(Boolean(data.enabled), data.tileUrl)
+          } else if (data.type === 'update-cyclones') {
+            renderCyclones(data.storms || [], data.enabled !== false)
+          } else if (data.type === 'focus-cyclone') {
+            try {
+              if (data.coordinates && Array.isArray(data.coordinates)) {
+                windyInstance.map.flyTo(data.coordinates, Math.max(windyInstance.map.getZoom(), 7), {
+                  duration: 1.2,
+                })
+                if (data.id && cycloneMarkersMap.has(data.id)) {
+                  setTimeout(() => {
+                    const m = cycloneMarkersMap.get(data.id)
+                    if (m) m.openPopup()
+                  }, 800)
+                }
+              }
+            } catch (err) {
+              console.error('Focus cyclone error:', err)
+            }
+          } else if (data.type === 'open-windy-picker') {
+            try {
+              windyInstance.picker.open({ lat: data.lat, lon: data.lon })
+              windyInstance.map.setView([data.lat, data.lon], Math.max(windyInstance.map.getZoom(), 8))
+            } catch (err) {
+              console.error('Windy picker open error:', err)
+            }
+          }
+        }
+
+        window.addEventListener('message', (event) => {
+          if (!event.data || typeof event.data !== 'object') return
+          processCommand(event.data)
+        })
+
         windyInit({
           key,
           lat: 20.5937,
@@ -32,27 +365,51 @@
           level: 'surface',
           product: 'gfs',
         }, function(windyAPI) {
+          windyInstance = windyAPI
+          setupLayers(windyAPI.map)
+
           const emitPicker = (params) => {
+            const currentOverlay = windyAPI.store.get('overlay')
             window.parent.postMessage({
               type: 'windy-picker',
               lat: params.lat,
               lon: params.lon,
               values: Array.isArray(params.values) ? params.values : [],
-              overlay: params.overlay || null
-            }, window.location.origin)
+              overlay: currentOverlay || params.overlay || null,
+            }, '*')
           }
+
           windyAPI.picker.on('pickerOpened', emitPicker)
           windyAPI.picker.on('pickerMoved', emitPicker)
+
           windyAPI.map.on('click', (event) => {
             const point = { lat: event.latlng.lat, lon: event.latlng.lng }
-            window.parent.postMessage({ type: 'windy-picker', ...point, values: [], overlay: null }, window.location.origin)
             windyAPI.picker.open(point)
+            window.parent.postMessage({
+              type: 'windy-picker',
+              ...point,
+              values: [],
+              overlay: windyAPI.store.get('overlay') || null,
+            }, '*')
           })
-          window.addEventListener('message', (event) => {
-            if (event.origin !== window.location.origin || event.data?.type !== 'open-windy-picker') return
-            windyAPI.picker.open({ lat: event.data.lat, lon: event.data.lon })
-            windyAPI.map.setView([event.data.lat, event.data.lon], Math.max(windyAPI.map.getZoom(), 8))
-          })
+
+          if (windyAPI.store && typeof windyAPI.store.on === 'function') {
+            windyAPI.store.on('overlay', (overlay) => {
+              window.parent.postMessage({
+                type: 'windy-overlay-changed',
+                overlay,
+              }, '*')
+            })
+          }
+
+          window.parent.postMessage({
+            type: 'windy-ready',
+            overlay: windyAPI.store.get('overlay') || 'wind',
+          }, '*')
+
+          while (pendingMessages.length > 0) {
+            processCommand(pendingMessages.shift())
+          }
         })
       }
     </script>

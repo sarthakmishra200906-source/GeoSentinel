@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import math
 from pathlib import Path
 
@@ -57,7 +57,7 @@ def predict(request: PredictionRequest) -> dict[str, object]:
             raise HTTPException(status_code=422, detail="feature_timestamp must be ISO-8601") from error
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=timezone.utc)
-        if timestamp > datetime.now(timezone.utc):
+        if timestamp > datetime.now(timezone.utc) + timedelta(minutes=2):
             raise HTTPException(status_code=422, detail="feature_timestamp cannot be in the future")
     if out_of_range:
         unavailable = {

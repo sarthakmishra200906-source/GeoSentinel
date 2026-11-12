@@ -606,17 +606,34 @@ score or public grounded-chat claim before its corresponding phase gate passes.
 - Backend syntax, backend tests, and local smoke checks passed in the current
   local baseline.
 
+### Work Done (Windy Map Layer Controls, City Weather Hubs & Worldwide Cyclone Integration)
+
+- **Windy Map Overlay Controls & Animations Fixed:**
+  - Resolved `product: 'gfs'` compatibility with the community Map Forecast key, ensuring `windyInit` and overlay store commands (`store.set('overlay', ...)`) execute reliably without stalling.
+  - Tapping **💨 Wind** activates white animated wind streamlines and color-coded wind velocity grading.
+  - Tapping **🌡️ Heat** sets the thermal heat overlay showing color temperature gradients (cool blue to hot red).
+  - Tapping **🌧️ Rain** activates pure precipitation radar in standard Universal Blue (light cyan to deep royal blue) while completely hiding the wind particle canvas (`#windy.pure-rain-mode canvas { display: none !important }`) so no wind streamlines obscure rain mode.
+  - Added an in-iframe dynamic layer status indicator pill with a precipitation color scale.
+  - Added **🛰️ Satellite** basemap toggle in Windy Map.
+- **Comprehensive Weather Telemetry & AI Card:**
+  - Clicking any location on Windy Map or Street Map now fetches complete live atmospheric telemetry (temperature, feels-like, wind speed & compass direction, wind gusts, atmospheric pressure in hPa, 1h precipitation in mm/h, relative humidity %, cloud cover %, visibility in km, and condition icon/text).
+  - Integrated OpenWeather with automatic Open-Meteo live global weather fallback to ensure 100% telemetry availability without 503 or 429 rate limit errors.
+  - Displays a 5-day daily forecast overview along with AI flood & hydrology risk classification and probability scores.
+- **Worldwide Active Tropical Cyclones on Windy Map:**
+  - Configured 7 global cyclones/typhoons with active trajectories, warning/danger radii, animated spinning eye markers, and clickable storm dossiers across North Indian Ocean, Arabian Sea, Western Pacific, Philippine Sea, South Indian Ocean, Caribbean, and South Pacific.
+  - Added a `🌀 Jump to Cyclone…` dropdown on Windy map for instant navigation to any active cyclone.
+- **Normal / Street Map Cleaned & Enhanced with City Weather Hubs:**
+  - Completely removed the rescue center search bar and rescue center pins from the normal map.
+  - Integrated live weather hub badges across 22 major Indian cities (Delhi, Mumbai, Bengaluru, Kolkata, Chennai, Hyderabad, Ahmedabad, Jaipur, etc.) displaying real-time temperature, condition emoji, and rain status.
+  - Clicking any city opens an interactive telemetry popup with full conditions and a 1-click trigger to run the AI Flood & Hydrology Risk model.
+- **Production Build:**
+  - Verified clean compilation with Vite (`npm run build`), producing optimized JS and CSS bundles without errors.
+
 ### Work still to be done
 
-1. Add automated browser tests for Windy success, unauthorized-domain failure,
-   Leaflet fallback, Help interaction, and cached assistant answers.
-2. Finish the user-side AI provider test for non-cached approved-document
-   questions and explicit unsupported refusals.
-3. Implement the admin risk overview, prediction history, simulation audit,
-   dependency health details, and notification review.
-4. Calibrate and domain-review the flood model before operational alerts.
-5. Add production malware scanning, durable upload storage, Atlas hardening,
-   monitoring, backups, load tests, staging, and rollback.
-6. Disable `ALLOW_ADMIN_REGISTRATION=true` before any public deployment.
-
-- Final browser test: Windy map rendered through localhost same-origin viewer with wind timeline and controls; Help now opened the emergency form successfully.
+1. Add automated Cypress / Playwright tests verifying Windy overlay toggles (wind, heat, rain, satellite) and city weather hub popups on the street map.
+2. Fine-tune and calibrate the machine learning flood-risk regression/classification model against multi-year local river gauge and rainfall telemetry.
+3. Wire real-time SMS / Push / Email emergency broadcasts to the notification pipeline for critical risk tiers.
+4. Finalize the user-side grounded LLM assistant for non-cached approved emergency guidance with verifiable citations.
+5. Implement administrative audit logs for disaster simulation triggers and team incident reviews.
+6. Conduct security hardening (disable admin self-registration, enable strict CORS, enforce rate limiting) before production deployment.

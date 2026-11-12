@@ -1,403 +1,514 @@
-import React, { Component } from 'react';
-import { MapContainer, TileLayer, ZoomControl, useMap, useMapEvents, Marker, Popup, Polyline, Circle } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import WeatherLayerControl from './WeatherLayerControl'
+import React, { Component } from 'react'
+import {
+  MapContainer,
+  TileLayer,
+  ZoomControl,
+  useMap,
+  useMapEvents,
+  Marker,
+  Popup,
+  Circle,
+} from 'react-leaflet'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import WindyMap from './WindyMap'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const streetMapUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
-const satelliteMapUrl =
-  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 
-function getWeatherLevel(point) {
+const createCityWeatherIcon = (point) => {
   const rain = Number(point.rainfall1h || 0)
-  const wind = Number(point.windSpeed || 0)
-  const temperature = Number(point.temperature || 0)
-  if (rain >= 15 || wind >= 60) return { label: 'Severe', color: '#dc2626' }
-  if (rain >= 5 || wind >= 35 || temperature >= 38) return { label: 'High', color: '#f97316' }
-  if (rain > 0 || wind >= 20 || temperature >= 32) return { label: 'Moderate', color: '#eab308' }
-  return { label: 'Normal', color: '#16a34a' }
-}
+  const temp = Math.round(point.temperature || 0)
+  const cond = String(point.condition || '').toLowerCase()
+  const isRain = rain > 0 || cond.includes('rain')
+  const isCloudy = cond.includes('cloud') || cond.includes('overcast')
+  const emoji = isRain ? '🌧️' : isCloudy ? '⛅' : '☀️'
+  const color = isRain ? '#0284c7' : temp >= 35 ? '#ef4444' : temp <= 16 ? '#06b6d4' : '#10b981'
 
-function getTemperatureColor(temperature) {
-  if (temperature >= 40) return '#b91c1c'
-  if (temperature >= 35) return '#ef4444'
-  if (temperature >= 30) return '#f97316'
-  if (temperature >= 24) return '#eab308'
-  if (temperature >= 16) return '#22c55e'
-  if (temperature >= 8) return '#06b6d4'
-  return '#2563eb'
-}
-
-function getRainColor(rainfall) {
-  if (rainfall >= 15) return '#7f1d1d'
-  if (rainfall >= 8) return '#dc2626'
-  if (rainfall >= 3) return '#f59e0b'
-  if (rainfall > 0) return '#38bdf8'
-  return '#94a3b8'
-}
-
-function getWindColor(windSpeed) {
-  if (windSpeed >= 60) return '#7c3aed'
-  if (windSpeed >= 40) return '#ef4444'
-  if (windSpeed >= 20) return '#f59e0b'
-  return '#22c55e'
-}
-
-function getPointColor(point, activeLayers) {
-  if (activeLayers.rain) return getRainColor(Number(point.rainfall1h || 0))
-  if (activeLayers.wind) return getWindColor(Number(point.windSpeed || 0))
-  return getTemperatureColor(Number(point.temperature || 0))
-}
-
-const createWeatherIcon = (point, activeLayers) =>
-  L.divIcon({
-    className: 'weather-stamp-icon',
-    html: (() => {
-      const level = getWeatherLevel(point)
-      return `<div class="weather-stamp" style="--weather-color:${getPointColor(point, activeLayers)}"><i></i><strong>${point.temperature}°C</strong><span>${point.name}</span><small>${level.label} · ${point.condition}</small></div>`
-    })(),
-    iconSize: [1, 1],
-    iconAnchor: [0, 0],
+  return L.divIcon({
+    className: 'city-weather-icon',
+    html: `
+      <div class="city-weather-badge" style="--badge-color: ${color}">
+        <span class="city-badge-name">${point.name}</span>
+        <span class="city-badge-data">${emoji} ${temp}°C</span>
+      </div>
+    `,
+    iconSize: [86, 36],
+    iconAnchor: [43, 18],
   })
+}
 
-const rescueCenterIcon = L.divIcon({
-  className: 'rescue-center-icon',
-  html: '<div class="rescue-center-pin" aria-label="Rescue center">+</div>',
-  iconSize: [28, 28],
-  iconAnchor: [14, 14],
+const userPointerIcon = L.divIcon({
+  className: 'user-location-icon',
+  html: '<span aria-hidden="true"></span>',
+  iconSize: [22, 22],
+  iconAnchor: [11, 11],
 })
 
+function getRiskTierClass(tier) {
+  const normalized = String(tier || '').toUpperCase()
+  if (normalized.includes('CRITICAL') || normalized.includes('HIGH')) return 'critical'
+  if (normalized.includes('MODERATE')) return 'moderate'
+  return 'low'
+}
+
+function fmt(v, suffix = '') {
+  return Number.isFinite(Number(v)) ? `${Number(v).toFixed(1)}${suffix}` : '—'
+}
+
+function getCompassDirection(deg) {
+  if (deg === null || deg === undefined) return ''
+  const val = Math.floor(deg / 22.5 + 0.5)
+  const arr = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+  return arr[val % 16]
+}
+
+function getWeatherIcon(condition, isRain) {
+  if (isRain) return '🌧️'
+  const c = String(condition || '').toLowerCase()
+  if (c.includes('thunder') || c.includes('storm')) return '⛈️'
+  if (c.includes('rain') || c.includes('drizzle')) return '🌧️'
+  if (c.includes('snow')) return '❄️'
+  if (c.includes('cloud') || c.includes('overcast')) return '⛅'
+  if (c.includes('fog') || c.includes('mist')) return '🌫️'
+  return '☀️'
+}
+
 export default class MapComponent extends Component {
+  mapInstance = null
+
   state = {
-    activeLayers: { temperature: false, rain: false, wind: false, clouds: false, storms: false },
-    satellite: true,
+    mapProvider: 'windy', // Windy is the default primary map
     weatherPoints: [],
-    stormTracks: [],
-    weatherUpdatedAt: null,
-    weatherAvailable: false,
-    rescueCenters: [],
-    rescueQuery: '',
+    weatherLoading: false,
+    userLocation: null,
+    selectedLocation: null,
+    weather: null,
+    forecast: null,
+    prediction: null,
+    loading: false,
+    cardOpen: false,
   }
 
   componentDidMount() {
-    if (import.meta.env.VITE_WINDY_MAP_FORECAST_KEY) return
-    this.loadWeather()
+    this.loadCityWeather()
   }
 
-  loadWeather = async () => {
+  loadCityWeather = async () => {
     try {
-      const [pointsResponse, stormsResponse, centersResponse] = await Promise.all([
-        fetch(`${API_URL}/weather/points`),
-        fetch(`${API_URL}/weather/storms`),
-        fetch(`${API_URL}/rescue-centers`),
-      ])
-      if (!pointsResponse.ok || !stormsResponse.ok || !centersResponse.ok) throw new Error('Map data request failed')
-      const points = await pointsResponse.json()
-      const storms = await stormsResponse.json()
-      const centers = await centersResponse.json()
-      this.setState({
-        weatherPoints: points.points || [],
-        stormTracks: storms.tracks || [],
-        weatherUpdatedAt: points.updatedAt || null,
-        weatherAvailable: points.available === true,
-        rescueCenters: Array.isArray(centers) ? centers : [],
-      })
-    } catch (error) {
-      console.error('Unable to load weather data', error)
+      this.setState({ weatherLoading: true })
+      const res = await fetch(`${API_URL}/weather/points`)
+      if (res.ok) {
+        const data = await res.json()
+        this.setState({ weatherPoints: data.points || [] })
+      }
+    } catch (err) {
+      console.warn('Unable to load city weather:', err)
+    } finally {
+      this.setState({ weatherLoading: false })
     }
   }
 
-  toggleLayer = (layer) => {
-    this.setState((state) => ({
-      activeLayers: { ...state.activeLayers, [layer]: !state.activeLayers[layer] },
-    }))
+  fetchRiskAndWeather = async (latitude, longitude) => {
+    this.setState({
+      selectedLocation: { latitude, longitude },
+      cardOpen: true,
+      loading: true,
+      weather: null,
+      forecast: null,
+      prediction: null,
+    })
+
+    try {
+      const [locationRes, forecastRes, predRes] = await Promise.allSettled([
+        fetch(`${API_URL}/weather/location?lat=${latitude}&lon=${longitude}`),
+        fetch(`${API_URL}/weather/forecast?lat=${latitude}&lon=${longitude}`),
+        fetch(`${API_URL}/prediction`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ latitude, longitude }),
+        }),
+      ])
+
+      let locData = null
+      let fData = null
+      let pData = null
+
+      if (locationRes.status === 'fulfilled' && locationRes.value.ok) {
+        locData = await locationRes.value.json()
+      }
+      if (forecastRes.status === 'fulfilled' && forecastRes.value.ok) {
+        fData = await forecastRes.value.json()
+      }
+      if (predRes.status === 'fulfilled' && predRes.value.ok) {
+        pData = await predRes.value.json()
+      }
+
+      if (!locData && pData?.weather) {
+        locData = pData.weather
+      }
+
+      this.setState({
+        weather: locData,
+        forecast: fData,
+        prediction: pData,
+        loading: false,
+      })
+    } catch (error) {
+      console.error('Fetch error:', error)
+      this.setState({ loading: false })
+    }
   }
 
-  toggleSatellite = () => {
-    this.setState((state) => ({ satellite: !state.satellite }))
+  handleUserLocated = (lat, lon) => {
+    this.setState({ userLocation: { latitude: lat, longitude: lon } })
+    if (this.mapInstance) {
+      this.mapInstance.flyTo([lat, lon], Math.max(this.mapInstance.getZoom(), 12))
+    }
+    this.fetchRiskAndWeather(lat, lon)
+  }
+
+  locateMe = () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser.')
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        this.handleUserLocated(coords.latitude, coords.longitude)
+      },
+      (error) => {
+        console.error('Geolocation error:', error)
+        alert('Unable to retrieve your location. Please check browser permissions.')
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    )
   }
 
   render() {
-    // Windy is the primary map provider. Leaflet remains a local fallback when
-    // the browser key is not configured.
-    if (import.meta.env.VITE_WINDY_MAP_FORECAST_KEY) return <WindyMap />
+    const {
+      mapProvider,
+      weatherPoints,
+      userLocation,
+      selectedLocation,
+      weather,
+      forecast,
+      prediction,
+      loading,
+      cardOpen,
+    } = this.state
 
-    const position = [20.5937, 78.9629];
-    const { activeLayers, satellite, weatherPoints, stormTracks, weatherUpdatedAt, weatherAvailable, rescueCenters, rescueQuery } = this.state
-    const visibleCenters = rescueCenters.filter((center) =>
-      `${center.name} ${center.address}`.toLowerCase().includes(rescueQuery.toLowerCase()),
-    )
+    // If Windy map is selected, render WindyMap component
+    if (mapProvider === 'windy') {
+      return (
+        <div className="map-background">
+          <WindyMap onSwitchToMap={() => this.setState({ mapProvider: 'street' })} />
+        </div>
+      )
+    }
+
+    // Standard Clean Street Map (OpenStreetMap) with City Weather Hubs
+    const defaultPosition = [20.5937, 78.9629]
+
     return (
       <div className="map-background">
-        <WeatherLayerControl
-          activeLayers={activeLayers}
-          onToggle={this.toggleLayer}
-          satellite={satellite}
-          onToggleSatellite={this.toggleSatellite}
-        />
-        {activeLayers.temperature && <div className="weather-animation weather-animation-heat" aria-hidden="true" />}
-        <div className="weather-status" role="status">
-          {weatherAvailable ? `Live weather · ${weatherUpdatedAt ? new Date(weatherUpdatedAt).toLocaleTimeString() : 'updated'}` : 'Live weather unavailable'}
+        {/* ── Street Map Top Controls Bar ── */}
+        <div className="top-controls-bar" role="toolbar" aria-label="Street map controls">
+          {/* Status badge */}
+          <div className="btn-control-toggle" style={{ cursor: 'default' }}>
+            🏙️ Cities Weather ({weatherPoints.length})
+          </div>
+
+          {/* My Location button */}
+          <button
+            type="button"
+            className="btn-location"
+            onClick={this.locateMe}
+            title="Locate my position"
+          >
+            📍 My Location
+          </button>
+
+          {/* Switch to Windy Map */}
+          <button
+            type="button"
+            className="btn-switch-map"
+            onClick={() => this.setState({ mapProvider: 'windy' })}
+            title="Switch to Windy Weather Map"
+          >
+            🌀 Windy Map
+          </button>
         </div>
-        <div className="weather-legend" aria-label="Weather color legend">
-          {activeLayers.rain ? (
-            <>
-              <strong>Precipitation / 1h</strong>
-              <span><i style={{ background: '#94a3b8' }} /> 0 mm</span>
-              <span><i style={{ background: '#38bdf8' }} /> Light</span>
-              <span><i style={{ background: '#f59e0b' }} /> Moderate</span>
-              <span><i style={{ background: '#7f1d1d' }} /> Severe</span>
-            </>
-          ) : activeLayers.wind ? (
-            <>
-              <strong>Wind</strong>
-              <span><i style={{ background: '#22c55e' }} /> &lt;20</span>
-              <span><i style={{ background: '#f59e0b' }} /> 20–40</span>
-              <span><i style={{ background: '#ef4444' }} /> 40–60</span>
-              <span><i style={{ background: '#7c3aed' }} /> 60+ km/h</span>
-            </>
-          ) : (
-            <>
-              <strong>Temperature</strong>
-              <span><i style={{ background: '#2563eb' }} /> &lt;8°C</span>
-              <span><i style={{ background: '#22c55e' }} /> 16–24°C</span>
-              <span><i style={{ background: '#f97316' }} /> 30–35°C</span>
-              <span><i style={{ background: '#b91c1c' }} /> 40°C+</span>
-            </>
-          )}
-        </div>
-        <label className="rescue-search">
-          <span>Find a rescue center</span>
-          <input
-            type="search"
-            value={rescueQuery}
-            onChange={(event) => this.setState({ rescueQuery: event.target.value })}
-            placeholder="Search name or address"
-          />
-        </label>
+
+        {/* ── Floating General Weather & AI Analysis Card ── */}
+        {cardOpen && selectedLocation && (
+          <aside className="map-data-card" aria-live="polite">
+            <div className="map-data-card-header">
+              <strong>📌 {selectedLocation.latitude.toFixed(4)}°, {selectedLocation.longitude.toFixed(4)}°</strong>
+              <button
+                type="button"
+                className="map-data-card-close"
+                onClick={() => this.setState({ cardOpen: false })}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            {loading && <p className="card-status-text">Fetching live weather telemetry & AI risk model…</p>}
+
+            {/* Weather Hero Header */}
+            {!loading && weather && (
+              <div className="card-weather-hero">
+                <div className="card-hero-main">
+                  <span className="card-hero-icon">
+                    {getWeatherIcon(weather.condition, Number(weather.rainfall1h || 0) > 0)}
+                  </span>
+                  <div>
+                    <div className="card-hero-temp">
+                      {fmt(weather.temperature, '°C')}
+                    </div>
+                    <div className="card-hero-cond">
+                      {weather.condition || 'Clear Sky'}
+                    </div>
+                  </div>
+                </div>
+                <div className="card-hero-sub">
+                  {weather.feelsLike && (
+                    <span>Feels like <b>{fmt(weather.feelsLike, '°C')}</b></span>
+                  )}
+                  {weather.provider && (
+                    <small className="card-provider-pill">{weather.provider}</small>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Complete General Weather Grid */}
+            {!loading && weather && (
+              <div className="card-data-section">
+                <span className="card-section-title">📊 Live Atmospheric Telemetry</span>
+                <div className="card-data-grid-full">
+                  <div className="weather-metric-tile">
+                    <span className="metric-label">💨 Wind</span>
+                    <span className="metric-val">{fmt(weather.windSpeed, ' km/h')}</span>
+                    {weather.windDirection !== null && weather.windDirection !== undefined && (
+                      <small className="metric-sub">
+                        {weather.windDirection}° {getCompassDirection(weather.windDirection)}
+                      </small>
+                    )}
+                  </div>
+
+                  <div className="weather-metric-tile">
+                    <span className="metric-label">⏱️ Pressure</span>
+                    <span className="metric-val">{weather.pressure ? `${weather.pressure} hPa` : '—'}</span>
+                    <small className="metric-sub">
+                      {weather.pressure && weather.pressure < 1005 ? 'Low (Storm risk)' : 'Standard'}
+                    </small>
+                  </div>
+
+                  <div className="weather-metric-tile">
+                    <span className="metric-label">🌧️ Rain (1h)</span>
+                    <span className="metric-val">{fmt(weather.rainfall1h, ' mm/h')}</span>
+                    <small className="metric-sub">
+                      {Number(weather.rainfall1h || 0) >= 10
+                        ? 'Heavy Rain'
+                        : Number(weather.rainfall1h || 0) > 0
+                          ? 'Moderate Rain'
+                          : 'No Rain'}
+                    </small>
+                  </div>
+
+                  <div className="weather-metric-tile">
+                    <span className="metric-label">💧 Humidity</span>
+                    <span className="metric-val">{weather.humidity !== undefined ? `${weather.humidity}%` : '—'}</span>
+                    <small className="metric-sub">
+                      {weather.humidity > 70 ? 'High' : weather.humidity < 40 ? 'Dry' : 'Normal'}
+                    </small>
+                  </div>
+
+                  <div className="weather-metric-tile">
+                    <span className="metric-label">☁️ Clouds</span>
+                    <span className="metric-val">{weather.cloudCover !== undefined ? `${weather.cloudCover}%` : '—'}</span>
+                    <small className="metric-sub">{weather.cloudCover > 60 ? 'Overcast' : 'Scattered'}</small>
+                  </div>
+
+                  <div className="weather-metric-tile">
+                    <span className="metric-label">👁️ Visibility</span>
+                    <span className="metric-val">{weather.visibility ? `${weather.visibility} km` : '10 km'}</span>
+                    <small className="metric-sub">Clear sight</small>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* AI Risk Assessment on current data */}
+            {!loading && prediction && (
+              <div className="card-data-section ai-analysis-section">
+                <span className="card-section-title">🤖 AI Risk Assessment</span>
+                <div className="ai-risk-row">
+                  <span className={`risk-tag ${getRiskTierClass(prediction.riskTier || prediction.risk_tier)}`}>
+                    {(prediction.riskTier || prediction.risk_tier || 'LOW').toUpperCase()} RISK
+                  </span>
+                  <span className="ai-score-text">
+                    Risk Score: {Number(prediction.probability || 0).toFixed(2)}
+                  </span>
+                </div>
+                {prediction.modelVersion && (
+                  <small className="ai-model-info">
+                    Model: {prediction.modelVersion} (Terrain & Hydrology AI)
+                  </small>
+                )}
+              </div>
+            )}
+
+            {/* 5-Day Daily Forecast List (if available) */}
+            {!loading && forecast && forecast.days && forecast.days.length > 0 && (
+              <div className="card-data-section">
+                <span className="card-section-title">📅 5-Day Forecast</span>
+                <div className="forecast-daily-list">
+                  {forecast.days.map((day) => (
+                    <div key={day.date} className="forecast-day-row">
+                      <span className="forecast-date">{day.date.slice(5)}</span>
+                      <span className="forecast-cond">{day.condition || 'Forecast'}</span>
+                      <span className="forecast-temps">
+                        {Math.round(day.minTemperature)}°–{Math.round(day.maxTemperature)}°
+                      </span>
+                      {Number(day.precipitation || 0) > 0 && (
+                        <span className="forecast-rain">🌧️ {Number(day.precipitation).toFixed(1)} mm</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!loading && !weather && !prediction && (
+              <p className="card-status-text error">Telemetry unavailable for this location.</p>
+            )}
+          </aside>
+        )}
+
+        {/* ── Standard Leaflet Street Map Container ── */}
         <MapContainer
-          center={position}
+          center={defaultPosition}
           zoom={5}
-          minZoom={4}
+          minZoom={2}
           zoomSnap={0.5}
-          maxBounds={[[-85, -540], [85, 540]]}
-          maxBoundsViscosity={1.0}
-          worldCopyJump={false}
           zoomControl={false}
           scrollWheelZoom={true}
           style={{ width: '100%', height: '100%' }}
         >
+          {/* Base Layer: OpenStreetMap Street Map */}
           <TileLayer
-            key={satellite ? 'satellite' : 'street'}
-            attribution={
-              satellite
-                ? 'Tiles &copy; Esri'
-                : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            }
-            url={satellite ? satelliteMapUrl : streetMapUrl}
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url={streetMapUrl}
+            maxZoom={19}
           />
-          {activeLayers.temperature && (
-            <TileLayer opacity={0.55} url={`${API_URL}/weather/tiles/temp_new/{z}/{x}/{y}.png`} />
-          )}
-          {activeLayers.rain && (
-            <TileLayer opacity={0.6} url={`${API_URL}/weather/tiles/precipitation_new/{z}/{x}/{y}.png`} />
-          )}
-          {activeLayers.wind && (
-            <TileLayer opacity={0.6} url={`${API_URL}/weather/tiles/wind_new/{z}/{x}/{y}.png`} />
-          )}
-          {activeLayers.clouds && (
-            <TileLayer opacity={0.45} url={`${API_URL}/weather/tiles/clouds_new/{z}/{x}/{y}.png`} />
-          )}
+
+          {/* Map instance capture */}
+          <MapInstanceCapture onMapReady={(map) => { this.mapInstance = map }} />
+
+          {/* General Weather Data Around Cities */}
           {weatherPoints.map((point) => (
-            <React.Fragment key={point.name}>
-            <Circle
-              center={[point.latitude, point.longitude]}
-              radius={45000}
-              pathOptions={{
-                color: getPointColor(point, activeLayers),
-                fillColor: getPointColor(point, activeLayers),
-                fillOpacity: 0.13,
-                weight: 2,
-              }}
-            />
-            <Marker position={[point.latitude, point.longitude]} icon={createWeatherIcon(point, activeLayers)}>
-              <Popup>
-                <strong>{point.name} · {getWeatherLevel(point).label}</strong>
-                <br />
-                Coordinates: {point.latitude.toFixed(4)}, {point.longitude.toFixed(4)}
-                <br />
-                Temperature: {point.temperature}°C (feels {point.feelsLike}°C)
-                <br />
-                Rain (1h): {point.rainfall1h} mm · Clouds: {point.cloudCover}%
-                <br />
-                Rain (3h): {point.rainfall3h} mm · Range: {point.tempMin}–{point.tempMax}°C
-                <br />
-                Humidity: {point.humidity}% · Pressure: {point.pressure} hPa
-                <br />
-                💨 {point.windSpeed} km/h · gust {point.windGust} km/h · direction {point.windDirection ?? 'N/A'}°
-                <br />
-                Visibility: {point.visibility ? `${(point.visibility / 1000).toFixed(1)} km` : 'N/A'}
-                <br />
-                Condition: {point.condition}
-                <br />
-                Observed: {point.observedAt ? new Date(point.observedAt).toLocaleString() : 'N/A'}
-              </Popup>
-            </Marker>
-            </React.Fragment>
-          ))}
-          {visibleCenters.map((center) => (
             <Marker
-              key={center._id}
-              position={[center.location.coordinates[1], center.location.coordinates[0]]}
-              icon={rescueCenterIcon}
+              key={point.name}
+              position={[point.latitude, point.longitude]}
+              icon={createCityWeatherIcon(point)}
             >
               <Popup>
-                <strong>{center.name}</strong>
-                <br />
-                {center.address}
-                <br />
-                Status: {center.status} · Occupancy: {center.occupancy}/{center.capacity}
-                <br />
-                Accessibility: {center.accessibility ? 'Available' : 'Not listed'}
-                <br />
-                Water: {center.waterAvailable ? 'Available' : 'Not listed'} · Medical: {center.medicalAvailable ? 'Available' : 'Not listed'}
-                <br />
-                Contact: {center.contact || 'Not listed'}
-                <br />
-                Last verified: {center.lastVerifiedAt ? new Date(center.lastVerifiedAt).toLocaleString() : 'Not listed'}
-                <br />
-                <a
-                  href={`https://www.google.com/maps/dir/?api=1&destination=${center.location.coordinates[1]},${center.location.coordinates[0]}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Get directions
-                </a>
+                <div style={{ minWidth: '190px', fontFamily: 'system-ui, sans-serif' }}>
+                  <strong style={{ fontSize: '15px', color: '#0f172a' }}>📍 {point.name}</strong>
+                  <div style={{ marginTop: '6px', fontSize: '12px', lineHeight: '1.6', color: '#334155' }}>
+                    <div><b>Condition:</b> {point.condition || 'Clear'}</div>
+                    <div><b>Temperature:</b> {point.temperature}°C {point.feelsLike ? `(Feels ${point.feelsLike}°C)` : ''}</div>
+                    <div><b>Rainfall:</b> {point.rainfall1h || 0} mm/h</div>
+                    <div><b>Humidity:</b> {point.humidity || '—'}%</div>
+                    <div><b>Wind:</b> {point.windSpeed || 0} km/h {point.windGust ? `(Gust ${point.windGust})` : ''}</div>
+                  </div>
+                  <button
+                    type="button"
+                    style={{
+                      marginTop: '8px',
+                      width: '100%',
+                      padding: '6px 10px',
+                      background: '#0284c7',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => this.fetchRiskAndWeather(point.latitude, point.longitude)}
+                  >
+                    🤖 Run AI Flood Risk Assessment
+                  </button>
+                </div>
               </Popup>
             </Marker>
           ))}
-          {activeLayers.storms &&
-            stormTracks.map((track) => (
-              <Polyline key={track.id} positions={track.coordinates} color="#f97316" weight={4}>
-                <Popup>{track.name}</Popup>
-              </Polyline>
-            ))}
-          <LocateControl />
-          <UserLocationMarker />
-          <MapLocationPicker />
+
+          {/* User Location Pulse Marker */}
+          {userLocation && (
+            <>
+              <Circle
+                center={[userLocation.latitude, userLocation.longitude]}
+                radius={3000}
+                pathOptions={{ color: '#2563eb', fillColor: '#3b82f6', fillOpacity: 0.25, weight: 2 }}
+              />
+              <Marker position={[userLocation.latitude, userLocation.longitude]} icon={userPointerIcon}>
+                <Popup>
+                  <strong>📍 Your Location</strong>
+                  <br />
+                  {userLocation.latitude.toFixed(4)}, {userLocation.longitude.toFixed(4)}
+                </Popup>
+              </Marker>
+            </>
+          )}
+
+          {/* Marker at clicked location */}
+          {selectedLocation && (
+            <>
+              <Circle
+                center={[selectedLocation.latitude, selectedLocation.longitude]}
+                radius={15000}
+                pathOptions={{ color: '#2563eb', fillColor: '#60a5fa', fillOpacity: 0.18, weight: 2, dashArray: '6 6' }}
+              />
+              <Marker position={[selectedLocation.latitude, selectedLocation.longitude]} icon={userPointerIcon}>
+                <Popup>
+                  <strong>Selected Point</strong>
+                  <br />
+                  {selectedLocation.latitude.toFixed(4)}, {selectedLocation.longitude.toFixed(4)}
+                </Popup>
+              </Marker>
+            </>
+          )}
+
+          <InteractiveMapClickHandler onSelect={this.fetchRiskAndWeather} />
           <ZoomControl position="bottomright" />
         </MapContainer>
       </div>
-    );
-  }
-
-}
-
-function MapLocationPicker() {
-    const [selected, setSelected] = React.useState(null)
-    useMapEvents({
-      async click(event) {
-        setSelected({ latitude: event.latlng.lat, longitude: event.latlng.lng, loading: true })
-        try {
-          const response = await fetch(`${API_URL}/prediction`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ latitude: event.latlng.lat, longitude: event.latlng.lng }),
-          })
-          if (!response.ok) throw new Error('Weather is unavailable for this location')
-          const result = await response.json()
-          setSelected({ ...result.weather, prediction: result, loading: false })
-        } catch (error) {
-          setSelected({ latitude: event.latlng.lat, longitude: event.latlng.lng, loading: false, error: error.message })
-        }
-      },
-    })
-
-    if (!selected) return null
-    return (
-      <>
-        <Circle
-          center={[selected.latitude, selected.longitude]}
-          radius={25000}
-          pathOptions={{ color: '#2563eb', fillColor: '#60a5fa', fillOpacity: 0.16, weight: 2, dashArray: '6 6' }}
-        />
-        <Marker position={[selected.latitude, selected.longitude]}>
-          <Popup>
-            <strong>Selected location</strong>
-            <br />
-            Coordinates: {selected.latitude.toFixed(4)}, {selected.longitude.toFixed(4)}
-            {selected.loading && <><br />Loading exact weather…</>}
-            {selected.error && <><br />{selected.error}</>}
-            {!selected.loading && !selected.error && (
-              <>
-                <br />
-                Temperature: {selected.temperature}°C (feels {selected.feelsLike}°C)
-                <br />
-                Precipitation: {selected.rainfall1h} mm/h · Clouds: {selected.cloudCover}%
-                <br />
-                Wind: {selected.windSpeed} km/h · direction {selected.windDirection ?? 'N/A'}°
-                <br />
-                <strong>Flood risk: {selected.prediction.riskTier || selected.prediction.risk_tier}</strong>
-                <br />
-                Status: {selected.prediction.status} · Probability: {selected.prediction.probability ?? 'Unavailable'}
-                <br />
-                Model: {selected.prediction.modelVersion || selected.prediction.model_version}
-              </>
-            )}
-          </Popup>
-        </Marker>
-      </>
     )
+  }
 }
 
-const userLocationIcon = L.divIcon({
-  className: 'user-location-icon',
-  html: '<span aria-hidden="true"></span>',
-  iconSize: [20, 20],
-  iconAnchor: [10, 10],
-})
-
-function UserLocationMarker() {
-  const [location, setLocation] = React.useState(null)
+function MapInstanceCapture({ onMapReady }) {
+  const map = useMap()
   React.useEffect(() => {
-    if (!navigator.geolocation) return undefined
-    const watchId = navigator.geolocation.watchPosition(
-      ({ coords }) => setLocation({ latitude: coords.latitude, longitude: coords.longitude, accuracy: coords.accuracy }),
-      () => {},
-      { enableHighAccuracy: true, maximumAge: 30000, timeout: 10000 },
-    )
-    return () => navigator.geolocation.clearWatch(watchId)
-  }, [])
-  if (!location) return null
-  return (
-    <>
-      <Circle
-        center={[location.latitude, location.longitude]}
-        radius={location.accuracy}
-        pathOptions={{ color: '#2563eb', fillColor: '#60a5fa', fillOpacity: 0.18, weight: 1 }}
-      />
-      <Marker position={[location.latitude, location.longitude]} icon={userLocationIcon}>
-        <Popup>Your current location<br />Accuracy: ±{Math.round(location.accuracy)} m</Popup>
-      </Marker>
-    </>
-  )
+    onMapReady(map)
+  }, [map, onMapReady])
+  return null
 }
 
-function LocateControl() {
-  const map = useMap();
-
-  const locate = () => {
-    if (!navigator.geolocation) return
-    navigator.geolocation.getCurrentPosition(({ coords }) => {
-      map.flyTo([coords.latitude, coords.longitude], Math.max(map.getZoom(), 12))
-    })
-  }
-
-  return (
-    <button className="map-locate-button" type="button" onClick={locate} aria-label="Show my current location">
-      ◎
-    </button>
-  )
+function InteractiveMapClickHandler({ onSelect }) {
+  const map = useMapEvents({
+    click(event) {
+      map.flyTo([event.latlng.lat, event.latlng.lng], Math.max(map.getZoom(), 8))
+      if (typeof onSelect === 'function') {
+        onSelect(event.latlng.lat, event.latlng.lng)
+      }
+    },
+  })
+  return null
 }

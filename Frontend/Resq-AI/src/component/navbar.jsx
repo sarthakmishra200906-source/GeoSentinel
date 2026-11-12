@@ -22,11 +22,21 @@ class NotificationPanel extends Component {
   state = { notifications: [], error: '' }
 
   componentDidMount() {
-    fetch(`${API_URL}/notifications`, { headers: { Authorization: `Bearer ${this.props.token}` } })
+    this.loadNotifications()
+    this.pollInterval = setInterval(this.loadNotifications, 10000)
+  }
+
+  componentWillUnmount() {
+    if (this.pollInterval) clearInterval(this.pollInterval)
+  }
+
+  loadNotifications = () => {
+    const headers = this.props.token ? { Authorization: `Bearer ${this.props.token}` } : {}
+    fetch(`${API_URL}/notifications`, { headers })
       .then(async (response) => {
         const data = await response.json()
         if (!response.ok) throw new Error(data.error || 'Unable to load notifications')
-        this.setState({ notifications: data })
+        this.setState({ notifications: Array.isArray(data) ? data : [] })
       })
       .catch((error) => this.setState({ error: error.message }))
   }
