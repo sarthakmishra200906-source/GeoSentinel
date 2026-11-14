@@ -40,7 +40,7 @@ test('simulation engine advances deterministic synthetic district results', () =
   const first = calculateSimulationStep(parameters, 1, '2026-11-15T00:00:00.000Z')
   const repeat = calculateSimulationStep(parameters, 1, '2026-11-15T00:00:00.000Z')
   assert.deepEqual(first, repeat)
-  assert.equal(first.impacts.districts.length, 7)
+  assert.equal(first.impacts.districts.length, 30)
   assert.equal(first.weather.hourlyRainfallMm, 180)
   assert.equal(first.cyclone.distanceToOdishaKm, 191.7)
 })

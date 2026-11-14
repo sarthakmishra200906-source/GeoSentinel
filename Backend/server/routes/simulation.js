@@ -130,7 +130,7 @@ router.post('/runs/:id/step', ...requireAdmin, async (request, response, next) =
       action: 'simulation.run.step',
       targetType: 'SimulationRun',
       targetId: run._id,
-      changes: { sequence: created.sequence, riskTier: created.impacts.riskTier },
+      changes: { sequence: created.sequence, riskTier: created.impacts.riskTier, dataSource: 'synthetic_simulation' },
     })
     response.json({ run, timestep: created, simulationMode: true })
   } catch (error) {

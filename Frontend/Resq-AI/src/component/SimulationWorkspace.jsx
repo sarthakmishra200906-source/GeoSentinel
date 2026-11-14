@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react'
+import { Line } from 'react-chartjs-2'
 import { Circle, MapContainer, Polyline, TileLayer, CircleMarker, Popup } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 
@@ -10,6 +11,10 @@ export default function SimulationWorkspace({ token }) {
     name: 'Odisha cyclone rehearsal',
     approachDistanceKm: 200,
     windSpeedKmh: 160,
+    startLatitude: 17.6,
+    startLongitude: 88.8,
+    targetLatitude: 20.3,
+    targetLongitude: 86.6,
     hourlyMm: 180,
     durationHours: 24,
     institutions: 500,
@@ -30,7 +35,14 @@ export default function SimulationWorkspace({ token }) {
         body: JSON.stringify({
           name: scenario.name,
           parameters: {
-            cyclone: { approachDistanceKm: Number(scenario.approachDistanceKm), windSpeedKmh: Number(scenario.windSpeedKmh) },
+            cyclone: {
+              approachDistanceKm: Number(scenario.approachDistanceKm),
+              windSpeedKmh: Number(scenario.windSpeedKmh),
+              startLatitude: Number(scenario.startLatitude),
+              startLongitude: Number(scenario.startLongitude),
+              targetLatitude: Number(scenario.targetLatitude),
+              targetLongitude: Number(scenario.targetLongitude),
+            },
             rainfall: { hourlyMm: Number(scenario.hourlyMm), durationHours: Number(scenario.durationHours) },
             capacity: { districts: 30, institutions: Number(scenario.institutions), shelters: Number(scenario.shelters) },
           },
@@ -99,8 +111,12 @@ export default function SimulationWorkspace({ token }) {
   }
 
   const selectedStep = timelineIndex >= 0 ? steps[timelineIndex] : null
-  const odishaTarget = [20.3, 86.6]
-  const cycloneStart = [17.6, 88.8]
+  const odishaTarget = selectedStep
+    ? [selectedStep.cyclone.targetLatitude, selectedStep.cyclone.targetLongitude]
+    : [Number(scenario.targetLatitude), Number(scenario.targetLongitude)]
+  const cycloneStart = selectedStep
+    ? [selectedStep.cyclone.startLatitude, selectedStep.cyclone.startLongitude]
+    : [Number(scenario.startLatitude), Number(scenario.startLongitude)]
   const cyclonePath = steps.map((stepItem) => {
     const progress = stepItem.cyclone.approachProgress
     return [
@@ -137,6 +153,10 @@ export default function SimulationWorkspace({ token }) {
           ['name', 'Scenario name', 'text'],
           ['approachDistanceKm', 'Cyclone approach (km)', 'number'],
           ['windSpeedKmh', 'Wind speed (km/h)', 'number'],
+          ['startLatitude', 'Start latitude', 'number'],
+          ['startLongitude', 'Start longitude', 'number'],
+          ['targetLatitude', 'Target latitude', 'number'],
+          ['targetLongitude', 'Target longitude', 'number'],
           ['hourlyMm', 'Heavy rain (mm/hour)', 'number'],
           ['durationHours', 'Rain duration (hours)', 'number'],
           ['institutions', 'Institutions exposed', 'number'],
@@ -198,6 +218,27 @@ export default function SimulationWorkspace({ token }) {
             {selectedStep.impacts.districts.map((district) => (
               <div key={district.district}><strong>{district.district}</strong><span>{district.riskTier} · {Math.round(district.riskScore * 100)}%</span></div>
             ))}
+          </div>
+        </div>
+      )}
+      {steps.length > 0 && (
+        <div className="simulation-chart-card">
+          <div className="simulation-map-heading">
+            <strong>Hourly simulation insights</strong>
+            <button type="button" onClick={() => window.print()}>Print / save PDF report</button>
+          </div>
+          <div className="simulation-chart">
+            <Line
+              data={{
+                labels: steps.map((stepItem) => `H${stepItem.sequence}`),
+                datasets: [
+                  { label: 'Risk score (%)', data: steps.map((stepItem) => Math.round(stepItem.impacts.riskScore * 100)), borderColor: '#dc2626', backgroundColor: 'rgba(220,38,38,.12)', fill: true, tension: 0.3 },
+                  { label: 'Rainfall (mm/hour)', data: steps.map((stepItem) => stepItem.weather.hourlyRainfallMm), borderColor: '#0284c7', tension: 0.3 },
+                  { label: 'River signal (%)', data: steps.map((stepItem) => Math.round(stepItem.weather.riverSignal * 100)), borderColor: '#0f766e', tension: 0.3 },
+                ],
+              }}
+              options={{ responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }}
+            />
           </div>
         </div>
       )}

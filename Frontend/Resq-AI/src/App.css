@@ -1635,6 +1635,111 @@ body,
   border-radius: 12px;
 }
 
+.simulation-chart-card {
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.simulation-chart {
+  height: 250px;
+  margin-top: 12px;
+}
+
+.audit-panel {
+  margin-top: 24px;
+  padding: 18px;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, .06);
+}
+
+.audit-panel-header,
+.audit-controls,
+.audit-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.audit-panel-header {
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.audit-panel-header h3 {
+  margin: 4px 0;
+}
+
+.audit-panel-header p {
+  margin: 0;
+  color: #64748b;
+}
+
+.audit-controls {
+  flex-wrap: wrap;
+}
+
+.audit-controls input,
+.audit-controls select {
+  min-width: 190px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 9px;
+  background: #fff;
+}
+
+.audit-table {
+  max-height: 580px;
+  overflow: auto;
+  border-top: 1px solid #e2e8f0;
+}
+
+.audit-row {
+  display: grid;
+  grid-template-columns: 170px minmax(150px, .7fr) minmax(180px, 1fr) minmax(180px, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 11px 4px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: .82rem;
+}
+
+.audit-row time,
+.audit-row span {
+  color: #64748b;
+}
+
+.audit-row code {
+  overflow: hidden;
+  color: #475569;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-pagination {
+  justify-content: flex-end;
+  margin-top: 14px;
+  color: #64748b;
+}
+
+.audit-pagination button {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.audit-pagination button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
 .simulation-metric,
 .simulation-districts {
   padding: 13px;
@@ -1678,6 +1783,16 @@ body,
 
   .simulation-results {
     grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+
+  .audit-panel-header,
+  .audit-row {
+    display: grid;
+  }
+
+  .audit-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 
   .simulation-timeline-header,

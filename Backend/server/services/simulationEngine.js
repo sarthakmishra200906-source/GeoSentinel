@@ -1,4 +1,11 @@
-const DISTRICTS = ['Ganjam', 'Puri', 'Khordha', 'Jagatsinghpur', 'Kendrapara', 'Balasore', 'Malkangiri']
+const DISTRICTS = [
+  'Angul', 'Balasore', 'Bargarh', 'Bhadrak', 'Bolangir', 'Boudh', 'Cuttack',
+  'Deogarh', 'Dhenkanal', 'Gajapati', 'Ganjam', 'Jagatsinghpur', 'Jajpur',
+  'Jharsuguda', 'Kalahandi', 'Kandhamal', 'Kendrapara', 'Kendujhar',
+  'Khordha', 'Koraput', 'Malkangiri', 'Mayurbhanj', 'Nabarangpur',
+  'Nayagarh', 'Nuapada', 'Puri', 'Rayagada', 'Sambalpur', 'Subarnapur',
+  'Sundargarh',
+]
 
 function clamp(value, min = 0, max = 1) {
   return Math.max(min, Math.min(max, value))
@@ -25,7 +32,7 @@ export function calculateSimulationStep(parameters, sequence, previousTimestamp)
   timestamp.setHours(timestamp.getHours() + 1)
   const districts = DISTRICTS.map((name, index) => {
     const localScore = clamp(score + ((index % 3) - 1) * 0.06)
-    const exposedInstitutions = Math.round((capacity.institutions || 0) / DISTRICTS.length * (0.7 + index / 20))
+    const exposedInstitutions = Math.round((capacity.institutions || 0) / DISTRICTS.length * (0.7 + index / 80))
     return {
       district: name,
       riskScore: Number(localScore.toFixed(4)),
@@ -45,6 +52,10 @@ export function calculateSimulationStep(parameters, sequence, previousTimestamp)
     timestamp,
     cyclone: {
       distanceToOdishaKm: Number(Math.max(0, Number(cyclone.approachDistanceKm || 200) * (1 - approach)).toFixed(1)),
+      startLatitude: Number(cyclone.startLatitude || 17.6),
+      startLongitude: Number(cyclone.startLongitude || 88.8),
+      targetLatitude: Number(cyclone.targetLatitude || 20.3),
+      targetLongitude: Number(cyclone.targetLongitude || 86.6),
       windSpeedKmh: Number(((cyclone.windSpeedKmh || 120) * (0.7 + approach * 0.3)).toFixed(1)),
       approachProgress: Number(approach.toFixed(4)),
     },

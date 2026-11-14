@@ -23,6 +23,10 @@ export function validateSimulationParameters(parameters = {}) {
 
   assertNumber(cyclone.approachDistanceKm ?? 200, 'cyclone.approachDistanceKm', { min: 0, max: 1000 })
   assertNumber(cyclone.windSpeedKmh ?? 120, 'cyclone.windSpeedKmh', { min: 0, max: 300 })
+  assertNumber(cyclone.startLatitude ?? 17.6, 'cyclone.startLatitude', { min: 15, max: 23 })
+  assertNumber(cyclone.startLongitude ?? 88.8, 'cyclone.startLongitude', { min: 80, max: 92 })
+  assertNumber(cyclone.targetLatitude ?? 20.3, 'cyclone.targetLatitude', { min: 15, max: 23 })
+  assertNumber(cyclone.targetLongitude ?? 86.6, 'cyclone.targetLongitude', { min: 80, max: 92 })
   assertNumber(rainfall.hourlyMm ?? 80, 'rainfall.hourlyMm', { min: 0, max: 500 })
   assertNumber(rainfall.durationHours ?? 24, 'rainfall.durationHours', { min: 1, max: 168 })
   assertNumber(capacity.districts ?? 30, 'capacity.districts', { min: 1, max: MAX_DISTRICTS })

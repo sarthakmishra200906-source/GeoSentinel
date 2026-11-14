@@ -24,6 +24,9 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
   const [message, setMessage] = useState('')
   const [centers, setCenters] = useState([])
   const [auditEvents, setAuditEvents] = useState([])
+  const [auditFilter, setAuditFilter] = useState('all')
+  const [auditSearch, setAuditSearch] = useState('')
+  const [auditPage, setAuditPage] = useState(1)
   const [health, setHealth] = useState(null)
   const [weatherDashboard, setWeatherDashboard] = useState(null)
   const [stateReport, setStateReport] = useState(null)
@@ -277,6 +280,21 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
       borderSkipped: false,
     }],
   }), [stateReport])
+
+  const visibleAuditEvents = useMemo(() => {
+    const search = auditSearch.trim().toLowerCase()
+    return auditEvents.filter((event) => {
+      const category = event.action?.split('.')[0] || 'other'
+      const categoryMatches = auditFilter === 'all' || category === auditFilter
+      const searchMatches = !search || [event.action, event.requestId, event.actor?.email, event.reason]
+        .some((value) => String(value || '').toLowerCase().includes(search))
+      return categoryMatches && searchMatches
+    })
+  }, [auditEvents, auditFilter, auditSearch])
+
+  const auditPageSize = 25
+  const auditPageCount = Math.max(1, Math.ceil(visibleAuditEvents.length / auditPageSize))
+  const pagedAuditEvents = visibleAuditEvents.slice((auditPage - 1) * auditPageSize, auditPage * auditPageSize)
 
   const professionalChartOptions = {
     responsive: true,
@@ -760,13 +778,41 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
         </p>
       ))}
 
-      <div id="admin-audit"><h3>Audit Log</h3></div>
-      {auditEvents.map((event) => (
-        <p key={event._id}>
-          {new Date(event.createdAt).toLocaleString()} · {event.action} · {event.oldStatus || '—'} →{' '}
-          {event.newStatus || '—'} · request {event.requestId}
-        </p>
-      ))}
+      <div id="admin-audit" className="audit-panel">
+        <div className="audit-panel-header">
+          <div>
+            <span className="eyebrow">Compliance trail</span>
+            <h3>Audit log</h3>
+            <p>Showing {visibleAuditEvents.length} matching events; newest first.</p>
+          </div>
+          <div className="audit-controls">
+            <input aria-label="Search audit log" placeholder="Search action, request ID, email" value={auditSearch} onChange={(event) => { setAuditSearch(event.target.value); setAuditPage(1) }} />
+            <select aria-label="Filter audit log" value={auditFilter} onChange={(event) => { setAuditFilter(event.target.value); setAuditPage(1) }}>
+              <option value="all">All activity</option>
+              <option value="simulation">Simulation</option>
+              <option value="guideline">Guidelines / RAG</option>
+              <option value="rescue-center">Rescue centers</option>
+              <option value="admin-verification">Security / admin</option>
+            </select>
+          </div>
+        </div>
+        <div className="audit-table" role="table" aria-label="Audit events">
+          {pagedAuditEvents.map((event) => (
+            <div className="audit-row" role="row" key={event._id}>
+              <time>{new Date(event.createdAt).toLocaleString()}</time>
+              <strong>{event.action}</strong>
+              <span>{event.actor?.email || 'Admin'} · {event.oldStatus || '—'} → {event.newStatus || '—'}</span>
+              <code>{event.requestId}</code>
+            </div>
+          ))}
+          {!pagedAuditEvents.length && <p>No audit events match the current filters.</p>}
+        </div>
+        <div className="audit-pagination">
+          <span>Page {auditPage} of {auditPageCount}</span>
+          <button type="button" disabled={auditPage <= 1} onClick={() => setAuditPage((page) => page - 1)}>Previous</button>
+          <button type="button" disabled={auditPage >= auditPageCount} onClick={() => setAuditPage((page) => page + 1)}>Next</button>
+        </div>
+      </div>
 
       {message && <p className="form-error" role="status">{message}</p>}
     </div>
