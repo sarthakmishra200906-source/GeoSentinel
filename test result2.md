@@ -314,3 +314,117 @@ Before calling the system ready for live cyclone operations, complete and test:
 Until those gates pass, use the simulator for local rehearsal and UI/workflow
 testing only. Do not use it as an official emergency forecast or autonomous
 dispatch authority.
+
+## 11. Strict simultaneous-system and 10,000-request check
+
+This section was added after the initial report. It is intentionally a frank
+acceptance result and does not replace or rewrite the earlier findings.
+
+### Test method
+
+The local services were already running on:
+
+- Express backend: `http://127.0.0.1:5000`
+- Vite frontend: `http://localhost:5173/GeoSentinel/`
+- ML service: `http://127.0.0.1:8000`
+
+The existing dependency-free smoke suite was run first. It exercised:
+
+- Frontend response.
+- Backend health and request IDs.
+- Backend readiness.
+- Missing-auth protection.
+- Admin mutation protection.
+- Chat authentication protection.
+- Rescue-center authorization.
+- Registration and ordinary-user authorization.
+- Invalid report handling.
+- Invalid weather-tile handling.
+- ML service health and valid/invalid prediction handling.
+- Live dashboard, state, trend, and map-prediction calls.
+
+Then a 10,000-request mixed concurrency probe was run with 200 local worker
+threads across health, live dashboard, live state, protected auth, and chat
+paths. This was an HTTP concurrency test, not 10,000 independent browser
+users, mobile clients, sockets, or geographically distributed systems.
+
+### Results
+
+| Check | Result | Verdict |
+|---|---:|---|
+| Existing cross-service smoke suite | 17/19 passed | **FAIL** |
+| Live state endpoint in smoke run | HTTP 503; upstream HTTP 429 | **FAIL** |
+| Live map prediction in smoke run | HTTP 429; upstream HTTP 429 | **FAIL** |
+| Mixed 10,000-request probe | 4,055 HTTP 200, 2,000 HTTP 401, 2,000 HTTP 404, 1,942 HTTP 503, 3 HTTP 500 | **FAIL** |
+| Health-only 10,000-request probe | 10,000 HTTP 200 | Pass for health endpoint only |
+| Health-only throughput | Approximately 1,605 requests/sec | Measurement only |
+| Backend health after load | HTTP 200, database connected | Pass |
+
+The 401 and 404 results in the mixed probe are expected for deliberately
+unauthenticated or invalid route requests. The 503 and 500 results are not
+acceptable as a full-system readiness result. The weather/provider HTTP 429
+responses demonstrate that external provider limits can make live features
+unavailable during repeated or concurrent access.
+
+### Acceptance decision
+
+**REJECTED for the requested claim that 10,000 people can use the complete
+system at once.**
+
+The system passes a narrow local health-endpoint stress check, but it does not
+pass a complete live-weather, prediction, chat, notification, SOS, AI, admin,
+and simulation concurrency gate. A single healthy `/api/health` endpoint
+cannot certify the whole platform.
+
+### What was not falsely counted as passing
+
+The following were not claimed as 10,000-user successes:
+
+- 10,000 authenticated public sessions.
+- 10,000 simultaneous live maps with independent provider data.
+- 10,000 concurrent AI/chat conversations.
+- 10,000 notification deliveries.
+- 10,000 SOS submissions and operator updates.
+- 10,000 WebSocket/SSE streams.
+- 10,000 simulation steps.
+- 10,000 users reading or writing MongoDB-backed operational data.
+- Multi-region or multi-machine traffic.
+- SMS, email, push, or external emergency-service delivery.
+
+Running 10,000 simulation mutations would also be the wrong test because it
+would create a large amount of audit and timestep data and could distort the
+local database. Those workflows need a purpose-built load-test environment,
+isolated test data, cleanup, and explicit rate limits.
+
+### Why the full test was rejected
+
+1. The live state and map-prediction paths reached an upstream provider rate
+   limit (`HTTP 429`).
+2. The mixed concurrent probe produced thousands of `503` responses and some
+   `500` responses.
+3. There is no completed distributed WebSocket/SSE fan-out test.
+4. There is no completed authenticated multi-user load test for chat, SOS,
+   notifications, admin operations, and simulation together.
+5. There is no cloud staging test with production-like MongoDB, caching,
+   queues, provider quotas, observability, and rollback.
+
+### Required work before retest
+
+- Add provider caching, quotas, backoff, circuit breakers, and stale-data
+  handling for weather and prediction dependencies.
+- Identify and eliminate the mixed-load HTTP 500 path with request IDs and
+  structured logs.
+- Use a staging load generator with distributed workers rather than one local
+  process.
+- Create authenticated test users and non-production test tenants.
+- Test chat, alerts, SOS, notifications, reports, admin reads, and simulation
+  reads/writes as separate measured scenarios.
+- Test WebSocket/SSE connection count, broadcast latency, reconnect, ordering,
+  and dropped-client behavior.
+- Measure MongoDB connection pools, indexes, queue depth, CPU, memory, and
+  provider quotas.
+- Define pass thresholds for error rate, p95/p99 latency, recovery time, and
+  data loss before rerunning the claim.
+
+Until that retest passes in staging, evaluators should record the platform as
+**local rehearsal ready, full concurrent operations not ready**.
