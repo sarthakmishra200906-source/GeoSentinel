@@ -79,6 +79,21 @@ router.post('/runs', ...requireAdmin, async (request, response, next) => {
   }
 })
 
+router.get('/runs', ...requireAdmin, async (request, response, next) => {
+  try {
+    const runs = await SimulationRun.find({
+      $or: [{ owner: request.user._id }, { collaborators: request.user._id }],
+    })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .populate('scenario', 'name parameters')
+      .lean()
+    response.json(runs.map((run) => ({ ...run, simulationMode: true })))
+  } catch (error) {
+    next(error)
+  }
+})
+
 router.get('/runs/:id', ...requireAdmin, async (request, response, next) => {
   try {
     const run = await SimulationRun.findOne({

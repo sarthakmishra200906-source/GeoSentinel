@@ -1668,6 +1668,36 @@ body,
   margin: 20px 0;
 }
 
+.simulation-run-history {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.simulation-run-history div {
+  display: grid;
+  gap: 4px;
+}
+
+.simulation-run-history span {
+  color: #64748b;
+  font-size: .82rem;
+}
+
+.simulation-run-history select {
+  min-width: 280px;
+  padding: 9px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+}
+
 .simulation-actions {
   display: flex;
   gap: 8px;

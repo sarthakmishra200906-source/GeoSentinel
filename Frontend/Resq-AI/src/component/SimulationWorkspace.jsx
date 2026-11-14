@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import { Line } from 'react-chartjs-2'
 import { Circle, MapContainer, Polyline, TileLayer, CircleMarker, Popup } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -34,10 +34,39 @@ export default function SimulationWorkspace({ token }) {
     shelters: 20,
   })
   const [run, setRun] = useState(null)
+  const [savedRuns, setSavedRuns] = useState([])
   const [steps, setSteps] = useState([])
   const [timelineIndex, setTimelineIndex] = useState(-1)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+
+  const loadRuns = useCallback(async () => {
+    const response = await fetch(`${API_URL}/simulation/runs`, { headers })
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.error || 'Unable to load saved simulation runs')
+    setSavedRuns(data)
+  }, [headers])
+
+  const loadRun = async (runId) => {
+    setBusy(true)
+    try {
+      const response = await fetch(`${API_URL}/simulation/runs/${runId}`, { headers })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to load simulation run')
+      setRun(data.run)
+      setSteps(data.timesteps || [])
+      setTimelineIndex(data.timesteps?.length ? data.timesteps.length - 1 : -1)
+      setMessage(`Loaded saved simulation run ${runId}.`)
+    } catch (error) {
+      setMessage(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  React.useEffect(() => {
+    loadRuns().catch((error) => setMessage(error.message))
+  }, [loadRuns])
 
   const createRun = async () => {
     setBusy(true)
@@ -71,6 +100,7 @@ export default function SimulationWorkspace({ token }) {
       const runData = await runResponse.json()
       if (!runResponse.ok) throw new Error(runData.error || 'Unable to create simulation run')
       setRun(runData)
+      await loadRuns()
       setSteps([])
       setTimelineIndex(-1)
       setMessage('Simulation ready. Advance one synthetic hour with Step.')
@@ -121,6 +151,7 @@ export default function SimulationWorkspace({ token }) {
 
     setRun(data)
     setMessage('Simulation paused.')
+    await loadRuns()
   }
 
   const selectedStep = timelineIndex >= 0 ? steps[timelineIndex] : null
@@ -188,6 +219,16 @@ export default function SimulationWorkspace({ token }) {
         <div>
           <h3 id="simulation-title">Flood &amp; cyclone simulator</h3>
           <p>Run a bounded, explainable scenario before connecting future live-context playback.</p>
+        </div>
+        <div className="simulation-run-history">
+          <div>
+            <strong>Saved cyclone runs</strong>
+            <span>Load a previous run by ID to review its map, hours, evidence, and reports.</span>
+          </div>
+          <select aria-label="Saved simulation runs" value={run?._id || ''} onChange={(event) => event.target.value && loadRun(event.target.value)} disabled={busy}>
+            <option value="">Select a saved run</option>
+            {savedRuns.map((savedRun) => <option key={savedRun._id} value={savedRun._id}>{savedRun.scenario?.name || 'Scenario'} · H{savedRun.sequence} · {savedRun.status}</option>)}
+          </select>
         </div>
         <div className="simulation-actions">
           <button type="button" className="form-submit" onClick={createRun} disabled={busy}>Create test run</button>
