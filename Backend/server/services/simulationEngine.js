@@ -62,6 +62,8 @@ export function calculateSimulationStep(parameters, sequence, previousTimestamp)
     weather: {
       hourlyRainfallMm: Number((rainfall.hourlyMm || 80).toFixed(1)),
       riverSignal: Number(river.toFixed(4)),
+      riverDischargeM3s: Number((river * 2500).toFixed(1)),
+      temperatureC: Number((28 - approach * 2 + rain * 1.5).toFixed(1)),
       soilSaturation: Number(clamp(rain * 0.8 + approach * 0.2).toFixed(4)),
     },
     impacts: {

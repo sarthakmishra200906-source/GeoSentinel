@@ -130,6 +130,14 @@ export default function SimulationWorkspace({ token }) {
         cycloneStart[1] + (odishaTarget[1] - cycloneStart[1]) * selectedStep.cyclone.approachProgress,
       ]
     : cycloneStart
+  const peakStep = steps.reduce((peak, item) => item.impacts.riskScore > peak.impacts.riskScore ? item : peak, steps[0])
+  const totalResourceDemand = selectedStep
+    ? selectedStep.recommendations.resources.reduce((total, item) => ({
+        boats: total.boats + item.boats,
+        paramedics: total.paramedics + item.paramedics,
+        rescueTeams: total.rescueTeams + item.rescueTeams,
+      }), { boats: 0, paramedics: 0, rescueTeams: 0 })
+    : { boats: 0, paramedics: 0, rescueTeams: 0 }
 
   return (
     <section className="simulation-workspace" aria-labelledby="simulation-title">
@@ -235,12 +243,58 @@ export default function SimulationWorkspace({ token }) {
                   { label: 'Risk score (%)', data: steps.map((stepItem) => Math.round(stepItem.impacts.riskScore * 100)), borderColor: '#dc2626', backgroundColor: 'rgba(220,38,38,.12)', fill: true, tension: 0.3 },
                   { label: 'Rainfall (mm/hour)', data: steps.map((stepItem) => stepItem.weather.hourlyRainfallMm), borderColor: '#0284c7', tension: 0.3 },
                   { label: 'River signal (%)', data: steps.map((stepItem) => Math.round(stepItem.weather.riverSignal * 100)), borderColor: '#0f766e', tension: 0.3 },
+                  { label: 'River discharge proxy (m³/s)', data: steps.map((stepItem) => stepItem.weather.riverDischargeM3s), borderColor: '#6366f1', tension: 0.3 },
+                  { label: 'Temperature proxy (°C)', data: steps.map((stepItem) => stepItem.weather.temperatureC), borderColor: '#f97316', tension: 0.3 },
                 ],
               }}
               options={{ responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }}
             />
           </div>
         </div>
+      )}
+      {steps.length > 0 && (
+        <section className="simulation-outcome-pack" aria-labelledby="simulation-outcome-title">
+          <div className="simulation-outcome-header">
+            <div>
+              <span className="eyebrow">Rehearsal evidence pack</span>
+              <h4 id="simulation-outcome-title">Cyclone outcome, help and insight summary</h4>
+              <p>Odisha values below are synthetic rule-matrix outputs. Live India telemetry remains in the Overview tab.</p>
+            </div>
+            <button type="button" onClick={() => window.print()}>Print final summary PDF</button>
+          </div>
+          <div className="simulation-outcome-grid">
+            <div><span>Peak risk</span><strong>{peakStep.impacts.riskTier} · {Math.round(peakStep.impacts.riskScore * 100)}%</strong><small>Hour {peakStep.sequence}</small></div>
+            <div><span>Peak rainfall</span><strong>{Math.max(...steps.map((item) => item.weather.hourlyRainfallMm)).toFixed(1)} mm/h</strong><small>Synthetic Odisha signal</small></div>
+            <div><span>Peak river discharge proxy</span><strong>{Math.max(...steps.map((item) => item.weather.riverDischargeM3s)).toFixed(1)} m³/s</strong><small>Not a gauge reading</small></div>
+            <div><span>Resource advice at viewed hour</span><strong>{totalResourceDemand.rescueTeams} teams</strong><small>{totalResourceDemand.boats} boats · {totalResourceDemand.paramedics} paramedics</small></div>
+          </div>
+          <div className="simulation-outcome-columns">
+            <div className="simulation-outcome-card">
+              <h5>User help / reports</h5>
+              <strong>Not connected to this isolated run</strong>
+              <p>No public SOS, help message, notification, or citizen report was created. A live incident inbox must be tested separately before operational use.</p>
+            </div>
+            <div className="simulation-outcome-card">
+              <h5>AI insight</h5>
+              <strong>Rule-matrix explanation only</strong>
+              <p>{selectedStep?.recommendations.rationale} This run did not send synthetic data to grounded AI chat or claim an AI forecast.</p>
+            </div>
+            <div className="simulation-outcome-card">
+              <h5>Final review</h5>
+              <strong>What to improve</strong>
+              <p>Validate against gauges and verified incident data, add resource reservations, connect approved live telemetry, and generate server-signed reports before deployment.</p>
+            </div>
+          </div>
+          {selectedStep && <div className="simulation-hour-table">
+            <h5>Viewed-hour district evidence</h5>
+            <div className="simulation-hour-row simulation-hour-heading"><span>District</span><span>Risk</span><span>Rain</span><span>River signal</span><span>Exposure</span></div>
+            {selectedStep.impacts.districts.map((district) => (
+              <div className="simulation-hour-row" key={district.district}>
+                <strong>{district.district}</strong><span>{district.riskTier}</span><span>{district.rainfallMm} mm/h</span><span>{Math.round(district.riverSignal * 100)}%</span><span>{district.exposedInstitutions}</span>
+              </div>
+            ))}
+          </div>}
+        </section>
       )}
       {message && <p className="form-error" role="status">{message}</p>}
     </section>

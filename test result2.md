@@ -428,3 +428,100 @@ isolated test data, cleanup, and explicit rate limits.
 
 Until that retest passes in staging, evaluators should record the platform as
 **local rehearsal ready, full concurrent operations not ready**.
+
+## 12. Follow-up review: missing cyclone outcome pack and admin layout
+
+The earlier report correctly recorded that the simulator mechanics worked, but
+it also exposed a major product gap: the test did not present one complete
+cyclone outcome package containing hourly telemetry, user-help status, AI
+insight status, and a final summary in one admin view. The old dashboard also
+rendered every section in one long page, while the section buttons only
+scrolled to anchors.
+
+### Fixes made
+
+- Converted Overview, Simulation, Operations, Guidelines &amp; upload, and Audit
+  into exclusive admin views instead of stacking all sections vertically.
+- Added a fixed secondary admin rail beside the existing global navigation so
+  labels and content no longer overlap or clip.
+- Kept a responsive horizontal tab rail for narrow screens.
+- Kept the simulation workspace as a dedicated view with its own map and
+  controls.
+- Added synthetic temperature and river-discharge-proxy fields to every
+  simulation timestep.
+- Added chart series for:
+  - Hourly rainfall.
+  - River signal.
+  - River discharge proxy.
+  - Temperature proxy.
+  - Risk score.
+- Added a cyclone outcome pack with:
+  - Peak risk and peak hour.
+  - Peak rainfall.
+  - Peak river-discharge proxy.
+  - Advisory boats, paramedics, and rescue teams at the viewed hour.
+  - Viewed-hour district evidence for risk, rainfall, river signal, and
+    exposed institutions.
+  - User-help/report status.
+  - AI insight status.
+  - Final review and improvement guidance.
+- Added a final-summary browser print/save-to-PDF action.
+
+### Strict honesty about the new data
+
+The new temperature and river-discharge values are **synthetic proxies from
+the rule engine**, not Odisha gauges or official forecasts. They are labeled
+as proxies in the UI and report. The live Overview tab continues to show
+India-wide and monitored-city telemetry from the configured live weather
+provider. The simulation remains Odisha-only and must not be interpreted as a
+live all-India cyclone model.
+
+The user-help card explicitly states that no public SOS, help message,
+notification, or citizen report was created by the isolated simulation. The AI
+card explicitly states that the run produced a rule-matrix explanation only;
+synthetic steps were not sent to grounded AI chat and were not presented as an
+AI forecast.
+
+### Follow-up automated validation
+
+After these changes:
+
+```powershell
+cd Backend\server
+npm test
+```
+
+Result: **13 passed, 0 failed**.
+
+```powershell
+cd Frontend\Resq-AI
+npm run build
+npm run lint
+```
+
+Results:
+
+- Production build: **passed**.
+- Lint: **passed with existing warnings** in `WindyMap.jsx` and the existing
+  admin data-loading effect; no new build-blocking lint error remained.
+
+### Follow-up browser validation
+
+The shared browser page was reloaded and Admin Dashboard → Simulation was
+opened. The observed result was:
+
+```text
+Navigation tabs: 5
+Simulation view visible: yes
+Overview/Operations/Guidelines/Audit visible in Simulation view: no
+Outcome pack after one synthetic step: yes
+Hourly chart: yes
+District evidence rows: 31 (header + 30 Odisha districts)
+User help status text: present
+```
+
+This fixes the missing presentation layer for the local rehearsal. It does
+not change the previous strict rejection of full live multi-system and
+10,000-user readiness. Live notifications, SOS, user help, grounded AI,
+provider delivery, and cloud concurrency still require separate integrated
+staging tests.

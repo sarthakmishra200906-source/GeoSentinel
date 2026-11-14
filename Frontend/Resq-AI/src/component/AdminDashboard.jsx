@@ -346,10 +346,7 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
           ['guidelines', 'Guidelines & upload'],
           ['audit', 'Audit log'],
         ].map(([id, label]) => (
-          <button key={id} type="button" className={activeSection === id ? 'active' : ''} onClick={() => {
-            setActiveSection(id)
-            document.getElementById(`admin-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-          }}>{label}</button>
+          <button key={id} type="button" className={activeSection === id ? 'active' : ''} onClick={() => setActiveSection(id)}>{label}</button>
         ))}
       </nav>
       <div className="admin-dashboard-toolbar">
@@ -361,7 +358,7 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
           🗺️ Open map
         </button>
       </div>
-      <div id="admin-overview"><h3>System Health</h3></div>
+      {activeSection === 'overview' && <div className="admin-view-panel" id="admin-overview"><h3>System Health</h3>
       <p>
         {health
           ? Object.entries(health)
@@ -538,7 +535,9 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
           </button>
         </div>
       </section>
+      </div>}
 
+      {activeSection === 'operations' && <>
       <h3>Broadcast Emergency Notification</h3>
       <form
         className="auth-form"
@@ -568,9 +567,10 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
           Broadcast to Citizens
         </button>
       </form>
+      </>}
 
-      <div id="admin-simulation"><SimulationWorkspace token={token} /></div>
-      <div id="admin-operations"><h3>Rescue Centers (Manage & Upload)</h3></div>
+      {activeSection === 'simulation' && <div id="admin-simulation"><SimulationWorkspace token={token} /></div>}
+      {activeSection === 'operations' && <><div id="admin-operations"><h3>Rescue Centers (Manage &amp; Upload)</h3></div>
       <form
         className="auth-form"
         onSubmit={(event) => saveCenter(event).catch((error) => setMessage(error.message))}
@@ -708,7 +708,9 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
           </button>
         </p>
       ))}
+      </>}
 
+      {activeSection === 'guidelines' && <>
       <div id="admin-guidelines"><h3>Official Guidelines &amp; Document Upload</h3></div>
       <form
         className="auth-form"
@@ -777,8 +779,9 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
           </button>
         </p>
       ))}
+      </>}
 
-      <div id="admin-audit" className="audit-panel">
+      {activeSection === 'audit' && <div id="admin-audit" className="audit-panel">
         <div className="audit-panel-header">
           <div>
             <span className="eyebrow">Compliance trail</span>
@@ -813,6 +816,7 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
           <button type="button" disabled={auditPage >= auditPageCount} onClick={() => setAuditPage((page) => page + 1)}>Next</button>
         </div>
       </div>
+      }
 
       {message && <p className="form-error" role="status">{message}</p>}
     </div>

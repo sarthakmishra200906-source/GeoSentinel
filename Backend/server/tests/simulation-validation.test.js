@@ -42,5 +42,7 @@ test('simulation engine advances deterministic synthetic district results', () =
   assert.deepEqual(first, repeat)
   assert.equal(first.impacts.districts.length, 30)
   assert.equal(first.weather.hourlyRainfallMm, 180)
+  assert.equal(typeof first.weather.riverDischargeM3s, 'number')
+  assert.equal(typeof first.weather.temperatureC, 'number')
   assert.equal(first.cyclone.distanceToOdishaKm, 191.7)
 })

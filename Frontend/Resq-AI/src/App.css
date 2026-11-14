@@ -1491,30 +1491,35 @@ body,
 }
 
 .admin-view-active .admin-dashboard {
-  width: min(1120px, calc(100% - 48px));
-  margin: 0 auto 0 272px;
+  width: min(1280px, calc(100% - 272px - 40px));
+  margin: 0 20px 0 252px;
   padding: 32px 0 64px;
 }
 
 .admin-section-nav {
-  position: sticky;
+  position: fixed;
   top: 0;
-  z-index: 4;
-  display: flex;
+  left: 224px;
+  bottom: 0;
+  z-index: 5;
+  display: grid;
+  align-content: start;
+  width: 188px;
   gap: 8px;
-  flex-wrap: wrap;
-  padding: 12px 0 16px;
-  background: linear-gradient(180deg, #f8fafc 80%, rgba(248, 250, 252, 0));
+  padding: 92px 14px 20px;
+  background: #f1f5f9;
+  border-right: 1px solid #e2e8f0;
 }
 
 .admin-section-nav button {
-  border: 1px solid #cbd5e1;
-  border-radius: 999px;
-  padding: 9px 14px;
-  background: #fff;
+  border: 0;
+  border-radius: 10px;
+  padding: 12px 13px;
+  background: transparent;
   color: #334155;
   cursor: pointer;
   font-weight: 700;
+  text-align: left;
 }
 
 .admin-section-nav button.active,
@@ -1526,6 +1531,91 @@ body,
 
 .admin-dashboard [id^="admin-"] {
   scroll-margin-top: 76px;
+}
+
+.admin-view-panel {
+  min-width: 0;
+}
+
+.simulation-outcome-pack {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid #cbd5e1;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.simulation-outcome-header,
+.simulation-outcome-columns,
+.simulation-outcome-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.simulation-outcome-header {
+  grid-template-columns: 1fr auto;
+  align-items: start;
+}
+
+.simulation-outcome-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
+.simulation-outcome-grid > div,
+.simulation-outcome-card {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.simulation-outcome-grid span,
+.simulation-outcome-grid small,
+.simulation-outcome-card p {
+  color: #64748b;
+  font-size: .82rem;
+}
+
+.simulation-outcome-columns {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.simulation-outcome-card h5,
+.simulation-hour-table h5 {
+  margin: 0;
+}
+
+.simulation-outcome-card p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.simulation-hour-table {
+  max-height: 360px;
+  overflow: auto;
+  margin-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.simulation-hour-row {
+  display: grid;
+  grid-template-columns: 1.2fr .8fr 1fr 1fr .8fr;
+  gap: 10px;
+  padding: 8px 4px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: .82rem;
+}
+
+.simulation-hour-heading {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  color: #64748b;
+  font-weight: 700;
 }
 
 .simulation-workspace {
@@ -1776,6 +1866,34 @@ body,
 }
 
 @media (max-width: 700px) {
+  .admin-view-active .admin-dashboard {
+    width: auto;
+    margin: 0 16px;
+    padding-top: 86px;
+  }
+
+  .admin-section-nav {
+    position: sticky;
+    top: 0;
+    left: auto;
+    bottom: auto;
+    width: auto;
+    display: flex;
+    overflow-x: auto;
+    padding: 8px 0;
+    border-right: 0;
+  }
+
+  .admin-section-nav button {
+    white-space: nowrap;
+  }
+
+  .simulation-outcome-header,
+  .simulation-outcome-grid,
+  .simulation-outcome-columns {
+    grid-template-columns: 1fr;
+  }
+
   .simulation-banner,
   .simulation-workspace-header {
     display: grid;
