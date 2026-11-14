@@ -1,52 +1,33 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle } from 'react-leaflet'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
+import { Bar, Line } from 'react-chartjs-2'
+import {
+  BarElement,
+  CategoryScale,
+  Chart as ChartJS,
+  Filler,
+  Legend,
+  LineElement,
+  LinearScale,
+  PointElement,
+  Tooltip,
+} from 'chart.js'
+
+ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend, Filler)
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
-const streetMapUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
 
-const rescueCenterIcon = L.divIcon({
-  className: 'rescue-center-icon',
-  html: '<div class="rescue-center-pin" aria-label="Rescue center">🏥</div>',
-  iconSize: [28, 28],
-  iconAnchor: [14, 14],
-})
-
-const cycloneIcon = L.divIcon({
-  className: 'cyclone-icon',
-  html: '<div style="font-size: 26px; text-shadow: 0 0 8px red;">🌀</div>',
-  iconSize: [30, 30],
-  iconAnchor: [15, 15],
-})
-
-const ARABIAN_SEA_CYCLONE_SIMULATION = {
-  name: '🌀 Arabian Sea Cyclone ASNA (Mock Test)',
-  category: 'Severe Cyclonic Storm (Simulated)',
-  maxWindKmh: 95,
-  pressureHpa: 988,
-  coordinates: [
-    [19.2, 70.5],
-    [20.5, 69.2],
-    [21.8, 68.1],
-    [22.9, 66.8],
-    [23.6, 65.4],
-    [24.1, 63.5],
-  ],
-  radiiKm: { warning: 140, danger: 70 },
-  landfallRisk: ['Kutch Coastal Belt', 'Saurashtra Coast', 'South Sindh Coast'],
-}
-
-export default function AdminDashboard({ token }) {
+export default function AdminDashboard({ token, onSwitchToMap }) {
   const [guidelines, setGuidelines] = useState([])
   const [verifications, setVerifications] = useState([])
   const [message, setMessage] = useState('')
   const [centers, setCenters] = useState([])
   const [auditEvents, setAuditEvents] = useState([])
   const [health, setHealth] = useState(null)
+  const [weatherDashboard, setWeatherDashboard] = useState(null)
+  const [stateReport, setStateReport] = useState(null)
+  const [trendReport, setTrendReport] = useState(null)
+  const [selectedState, setSelectedState] = useState('')
   const [simulation, setSimulation] = useState(null)
-  const [isMapMaximized, setIsMapMaximized] = useState(false)
-  const [cycloneMockActive, setCycloneMockActive] = useState(false)
   const [notificationForm, setNotificationForm] = useState({
     title: '',
     message: '',
@@ -77,13 +58,15 @@ export default function AdminDashboard({ token }) {
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token])
   const load = useCallback(async () => {
-    const [guidelineResponse, verificationResponse, centersResponse, auditResponse, healthResponse] =
+    const [guidelineResponse, verificationResponse, centersResponse, auditResponse, healthResponse, weatherResponse, stateResponse] =
       await Promise.all([
         fetch(`${API_URL}/admin/guidelines`, { headers }),
         fetch(`${API_URL}/admin/verifications`, { headers }),
         fetch(`${API_URL}/rescue-centers`, { headers }),
         fetch(`${API_URL}/admin/audit`, { headers }),
         fetch(`${API_URL}/admin/health`, { headers }),
+        fetch(`${API_URL}/weather/dashboard`),
+        fetch(`${API_URL}/weather/states`),
       ])
     if (!guidelineResponse.ok || !verificationResponse.ok || !auditResponse.ok)
       throw new Error('Unable to load admin data')
@@ -92,22 +75,21 @@ export default function AdminDashboard({ token }) {
     setCenters(await centersResponse.json())
     setAuditEvents(await auditResponse.json())
     setHealth(healthResponse.ok ? await healthResponse.json() : null)
+    setWeatherDashboard(weatherResponse.ok ? await weatherResponse.json() : null)
+    setStateReport(stateResponse.ok ? await stateResponse.json() : null)
   }, [headers])
 
-  const toggleCycloneMock = async () => {
-    const nextState = !cycloneMockActive
-    setCycloneMockActive(nextState)
-    await fetch(`${API_URL}/weather/storms/simulate`, {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ active: nextState }),
-    }).catch(() => {})
-    setMessage(
-      nextState
-        ? 'Arabian Sea Cyclone ASNA simulation activated for real-time testing!'
-        : 'Cyclone simulation stopped. Real-time live weather restored.',
-    )
-  }
+  useEffect(() => {
+    const state = selectedState || stateReport?.states?.[0]?.state
+    if (!state) return
+    fetch(`${API_URL}/weather/trends?state=${encodeURIComponent(state)}`)
+      .then(async (response) => {
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.error || 'Unable to load state trends')
+        setTrendReport(data)
+      })
+      .catch((error) => setMessage(error.message))
+  }, [selectedState, stateReport])
 
   const runSimulation = async () => {
     const response = await fetch(`${API_URL}/prediction/simulate`, {
@@ -253,7 +235,7 @@ export default function AdminDashboard({ token }) {
     const response = await fetch(`${API_URL}/admin/guidelines`, { method: 'POST', headers, body })
     const data = await response.json()
     if (!response.ok) throw new Error(data.error || 'Upload failed')
-    setMessage(`Uploaded ${data.chunks} chunks. Approve it before chat can use it.`)
+    setMessage(`Uploaded ${data.chunks} RAG chunks. Approve the document before chat can use it.`)
     setForm({ title: '', issuingAuthority: '', officialUrl: '', jurisdiction: 'India', document: null })
     await load()
   }
@@ -268,6 +250,58 @@ export default function AdminDashboard({ token }) {
     await load()
   }
 
+  const exportTrendCsv = () => {
+    if (!trendReport?.months?.length) return
+    const rows = [
+      ['month', 'rainfall_mm', 'mean_temperature_c', 'max_temperature_c', 'average_river_discharge_m3s', 'flood_risk'],
+      ...trendReport.months.map((item) => [
+        item.month,
+        item.rainfallMm,
+        item.meanTemperature ?? '',
+        item.maxTemperature ?? '',
+        item.averageRiverDischarge ?? '',
+        item.floodRisk ?? '',
+      ]),
+    ]
+    const blob = new Blob([rows.map((row) => row.join(',')).join('\n')], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${trendReport.state.toLowerCase().replaceAll(' ', '-')}-weather-trend.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const activeRiskChartData = useMemo(() => ({
+    labels: (stateReport?.states || []).map((item) => item.state),
+    datasets: [{
+      label: 'Active flood risk (%)',
+      data: (stateReport?.states || []).map((item) =>
+        item.averageActiveFloodRisk === null ? null : Math.round(item.averageActiveFloodRisk * 100),
+      ),
+      backgroundColor: (stateReport?.states || []).map((item) => {
+        const risk = item.averageActiveFloodRisk || 0
+        return risk >= 0.5 ? '#ef4444' : risk >= 0.4 ? '#f59e0b' : '#22c55e'
+      }),
+      borderRadius: 8,
+      borderSkipped: false,
+    }],
+  }), [stateReport])
+
+  const professionalChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { intersect: false, mode: 'index' },
+    plugins: {
+      legend: { position: 'bottom', labels: { usePointStyle: true, padding: 18, color: '#334155' } },
+      tooltip: { padding: 12, cornerRadius: 10, displayColors: true },
+    },
+    scales: {
+      x: { grid: { display: false }, ticks: { color: '#64748b', maxRotation: 0 } },
+      y: { beginAtZero: true, grid: { color: 'rgba(148, 163, 184, 0.18)' }, ticks: { color: '#64748b' } },
+    },
+  }
+
   const updateGuideline = async (id, status) => {
     const response = await fetch(`${API_URL}/admin/guidelines/${id}`, {
       method: 'PATCH',
@@ -278,8 +312,33 @@ export default function AdminDashboard({ token }) {
     await load()
   }
 
+  const deleteGuideline = async (guideline) => {
+    if (!window.confirm(`Delete "${guideline.title}" permanently? This removes its RAG content.`)) return
+    if (!window.confirm('This cannot be undone. Continue only after verifying the document is obsolete or corrupted.')) return
+    const confirmationEmail = window.prompt('Type your signed-in administrator Gmail address to confirm deletion:')
+    if (!confirmationEmail) return
+    const response = await fetch(`${API_URL}/admin/guidelines/${guideline._id}`, {
+      method: 'DELETE',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmationEmail, confirmationTitle: guideline.title }),
+    })
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.error || 'Unable to delete guideline')
+    setMessage(`Deleted "${guideline.title}" and removed it from RAG.`)
+    await load()
+  }
+
   return (
     <div className="admin-dashboard">
+      <div className="admin-dashboard-toolbar">
+        <div>
+          <h2>Admin dashboard</h2>
+          <p>Manage verified content, rescue centers, notifications, and system health.</p>
+        </div>
+        <button type="button" className="btn-switch-map" onClick={onSwitchToMap}>
+          🗺️ Open map
+        </button>
+      </div>
       <h3>System Health</h3>
       <p>
         {health
@@ -290,93 +349,154 @@ export default function AdminDashboard({ token }) {
           : 'Health unavailable'}
       </p>
 
-      {/* Admin Tactical Map Box */}
-      <h3>Tactical Map & Cyclone Simulation Box</h3>
-      <div className={`admin-map-box ${isMapMaximized ? 'is-maximized' : ''}`}>
-        <div className="admin-map-toolbar">
-          <button
-            type="button"
-            className={`admin-map-btn ${cycloneMockActive ? 'primary' : ''}`}
-            onClick={toggleCycloneMock}
-          >
-            {cycloneMockActive ? '⏹️ Stop Cyclone Mock Test' : '🌀 Run Arabian Sea Cyclone Mock Test'}
-          </button>
-          <button
-            type="button"
-            className="admin-map-btn"
-            onClick={() => setIsMapMaximized(!isMapMaximized)}
-          >
-            {isMapMaximized ? '🗗 Minimize Map' : '⛶ Maximize Map'}
-          </button>
+      <section className="weather-report" aria-labelledby="weather-report-title">
+        <div className="weather-report-header">
+          <div>
+            <h3 id="weather-report-title">Live India Weather Report</h3>
+            <p>
+              Forecast data from {weatherDashboard?.provider || 'the live weather provider'}.
+              Rain values are forecast telemetry, not fabricated model output.
+            </p>
+          </div>
+          <div className="model-readiness">
+            <strong>Model readiness</strong>
+            <span>Flood-risk model: {health?.ml || 'checking'}</span>
+            <span>Rain chance: live forecast</span>
+            <span>Cyclone formation: live GDACS events only</span>
+          </div>
         </div>
+        {weatherDashboard?.india && (
+          <div className="weather-report-summary">
+            <div className="weather-report-card">
+              <span>India rain chance</span>
+              <strong>{Math.round(weatherDashboard.india.rainChance)}%</strong>
+              <div className="weather-bar"><i style={{ width: `${weatherDashboard.india.rainChance}%` }} /></div>
+            </div>
+            <div className="weather-report-card">
+              <span>India forecast rain</span>
+              <strong>{weatherDashboard.india.rainAmountMm.toFixed(1)} mm</strong>
+            </div>
+            <div className="weather-report-card">
+              <span>India max heat</span>
+              <strong>{weatherDashboard.india.maxTemperature.toFixed(1)}°C</strong>
+            </div>
+            <div className={`weather-report-card risk-card risk-${(weatherDashboard.india.activeFloodRiskTier || 'UNAVAILABLE').toLowerCase()}`}>
+              <span>Active flood risk</span>
+              <strong>
+                {weatherDashboard.india.activeFloodRisk === null
+                  ? 'Unavailable'
+                  : `${Math.round(weatherDashboard.india.activeFloodRisk * 100)}%`}
+              </strong>
+              <small>{weatherDashboard.india.activeFloodRiskTier || 'UNAVAILABLE'} · live telemetry</small>
+            </div>
+          </div>
+        )}
+        {weatherDashboard?.cities?.length > 0 && (
+          <div className="weather-city-table">
+            <div className="weather-city-row weather-city-heading">
+              <span>City</span><span>Rain outlook</span><span>Rain amount</span><span>Heat</span><span>Active flood risk</span>
+            </div>
+            {weatherDashboard.cities.map((city) => (
+              <div className="weather-city-row" key={city.name}>
+                <strong>{city.name}</strong>
+                <span>
+                  {Math.round(city.rainChance)}%
+                  <i className="weather-inline-bar"><b style={{ width: `${city.rainChance}%` }} /></i>
+                </span>
+                <span>{city.rainAmountMm.toFixed(1)} mm</span>
+                <span>{city.maxTemperature.toFixed(1)}°C</span>
+                <span>{city.activeFloodRiskTier || city.floodRiskTier} · {city.riverDischarge.toFixed(1)} m³/s</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {!weatherDashboard && <p className="form-error">Live weather report is unavailable.</p>}
+      </section>
 
-        <MapContainer
-          center={[21.5, 71.0]}
-          zoom={isMapMaximized ? 6 : 5}
-          zoomControl={false}
-          scrollWheelZoom={true}
-          style={{ width: '100%', height: '100%' }}
-        >
-          <TileLayer url={streetMapUrl} attribution="&copy; OpenStreetMap" />
-
-          {/* Rescue Centers */}
-          {centers.map((center) => (
-            <Marker
-              key={center._id}
-              position={[center.location.coordinates[1], center.location.coordinates[0]]}
-              icon={rescueCenterIcon}
-            >
-              <Popup>
-                <strong>{center.name}</strong>
-                <br />
-                {center.address}
-                <br />
-                Occupancy: {center.occupancy}/{center.capacity} · Status: {center.status}
-              </Popup>
-            </Marker>
-          ))}
-
-          {/* Cyclone Simulation on Admin Map */}
-          {cycloneMockActive && (
-            <>
-              <Polyline
-                positions={ARABIAN_SEA_CYCLONE_SIMULATION.coordinates}
-                color="#ea580c"
-                weight={5}
-                dashArray="10 8"
-              >
-                <Popup>
-                  <strong>{ARABIAN_SEA_CYCLONE_SIMULATION.name}</strong>
-                  <br />
-                  Wind: {ARABIAN_SEA_CYCLONE_SIMULATION.maxWindKmh} km/h · Pressure: {ARABIAN_SEA_CYCLONE_SIMULATION.pressureHpa} hPa
-                  <br />
-                  Coastal Advisory: {ARABIAN_SEA_CYCLONE_SIMULATION.landfallRisk.join(', ')}
-                </Popup>
-              </Polyline>
-              <Marker
-                position={ARABIAN_SEA_CYCLONE_SIMULATION.coordinates[1]}
-                icon={cycloneIcon}
-              >
-                <Popup>
-                  <strong>Current Eye Position (Mock Test)</strong>
-                  <br />
-                  Approaching Saurashtra / Kutch Coast
-                </Popup>
-              </Marker>
-              <Circle
-                center={ARABIAN_SEA_CYCLONE_SIMULATION.coordinates[1]}
-                radius={ARABIAN_SEA_CYCLONE_SIMULATION.radiiKm.warning * 1000}
-                pathOptions={{ color: '#ea580c', fillColor: '#f97316', fillOpacity: 0.15, weight: 2 }}
+      <section className="weather-report" aria-labelledby="state-analytics-title">
+        <div className="weather-report-header">
+          <div>
+            <h3 id="state-analytics-title">State Analytics</h3>
+            <p>
+              Historical rainfall and heat from Open-Meteo, plus current active
+              flood risk from live rain, river, pressure, and wind telemetry.
+            </p>
+          </div>
+          <label>
+            State
+            <select value={selectedState || stateReport?.states?.[0]?.state || ''} onChange={(event) => setSelectedState(event.target.value)}>
+              {stateReport?.states?.map((state) => <option key={state.state} value={state.state}>{state.state}</option>)}
+            </select>
+          </label>
+          <div className="analytics-actions">
+            <button type="button" onClick={() => window.print()}>Print report</button>
+            <button type="button" onClick={exportTrendCsv} disabled={!trendReport?.months?.length}>Export CSV</button>
+          </div>
+        </div>
+        {trendReport?.months?.length > 0 && (
+          <div className="analytics-chart-grid">
+            <div className="analytics-chart">
+              <h4>Monthly rainfall</h4>
+              <Bar
+                data={{
+                  labels: trendReport.months.map((item) => item.month),
+                  datasets: [
+                    { label: 'Rainfall (mm)', data: trendReport.months.map((item) => item.rainfallMm), backgroundColor: '#38bdf8', borderRadius: 7, borderSkipped: false },
+                  ],
+                }}
+                options={professionalChartOptions}
               />
-              <Circle
-                center={ARABIAN_SEA_CYCLONE_SIMULATION.coordinates[1]}
-                radius={ARABIAN_SEA_CYCLONE_SIMULATION.radiiKm.danger * 1000}
-                pathOptions={{ color: '#dc2626', fillColor: '#ef4444', fillOpacity: 0.25, weight: 2 }}
+            </div>
+            <div className="analytics-chart">
+              <h4>Monthly heat trend</h4>
+              <Line
+                data={{
+                  labels: trendReport.months.map((item) => item.month),
+                  datasets: [
+                    { label: 'Mean temperature (°C)', data: trendReport.months.map((item) => item.meanTemperature), borderColor: '#f97316', backgroundColor: 'rgba(249, 115, 22, 0.12)', fill: true, tension: 0.35, pointRadius: 3 },
+                    { label: 'Maximum temperature (°C)', data: trendReport.months.map((item) => item.maxTemperature), borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.08)', fill: true, tension: 0.35, pointRadius: 3 },
+                  ],
+                }}
+                options={professionalChartOptions}
               />
-            </>
-          )}
-        </MapContainer>
-      </div>
+            </div>
+            <div className="analytics-chart">
+              <h4>River discharge versus calibration threshold</h4>
+              <Line
+                data={{
+                  labels: trendReport.months.map((item) => item.month),
+                  datasets: [
+                    { label: 'Average discharge (m³/s)', data: trendReport.months.map((item) => item.averageRiverDischarge), borderColor: '#0ea5e9', backgroundColor: 'rgba(14, 165, 233, 0.12)', fill: true, tension: 0.35, pointRadius: 3 },
+                    { label: 'Proxy 95th percentile', data: trendReport.months.map(() => 2727.98), borderColor: '#94a3b8', borderDash: [6, 6], pointRadius: 0 },
+                  ],
+                }}
+                options={professionalChartOptions}
+              />
+            </div>
+            <div className="analytics-chart analytics-chart-risk">
+              <h4>Active flood risk by state</h4>
+              <Bar data={activeRiskChartData} options={{ ...professionalChartOptions, indexAxis: 'y', scales: { x: { ...professionalChartOptions.scales.y, max: 100, title: { display: true, text: 'Risk (%)' } }, y: { ...professionalChartOptions.scales.x } } }} />
+            </div>
+          </div>
+        )}
+        {stateReport?.states?.length > 0 && (
+          <div className="weather-city-table">
+            <div className="weather-city-row weather-city-heading">
+              <span>State</span><span>Hubs</span><span>Rainfall</span><span>Max heat</span><span>Active risk</span>
+            </div>
+            {stateReport.states.map((state) => (
+              <div className="weather-city-row" key={state.state}>
+                <strong>{state.state}</strong>
+                <span>{state.monitoredCities}</span>
+                <span>{state.rainfallMm.toFixed(1)} mm</span>
+                <span>{state.maxTemperature.toFixed(1)}°C</span>
+                <span>{state.averageActiveFloodRisk === null ? 'UNAVAILABLE' : state.averageActiveFloodRisk}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {trendReport?.warning && <p className="form-warning">{trendReport.warning}</p>}
+      </section>
 
       <h3>ML Flood Simulation</h3>
       <button type="button" onClick={() => runSimulation().catch((error) => setMessage(error.message))}>
@@ -597,17 +717,21 @@ export default function AdminDashboard({ token }) {
         </button>
       </form>
 
-      <h3>Pending Guidelines Review</h3>
-      {guidelines
-        .filter((item) => item.status === 'pending')
-        .map((item) => (
-          <p key={item._id}>
-            {item.title}{' '}
+      <h3>Guidelines / RAG documents</h3>
+      {guidelines.map((item) => (
+        <p key={item._id}>
+          <strong>{item.title}</strong> · {item.status} · {item.extractionMethod || 'text'} · {item.fileName}
+          {item.status === 'pending' && (
             <button type="button" onClick={() => updateGuideline(item._id, 'approved')}>
-              Approve
+              Approve for RAG
             </button>
-          </p>
-        ))}
+          )}
+          <button type="button" onClick={() => deleteGuideline(item).catch((error) => setMessage(error.message))}>
+            Delete document
+          </button>
+        </p>
+      ))}
+      {!guidelines.length && <p>No guideline documents uploaded yet.</p>}
 
       <h3>Admin Verification Requests</h3>
       {verifications.map((item) => (
@@ -630,7 +754,7 @@ export default function AdminDashboard({ token }) {
         </p>
       ))}
 
-      {message && <p className="form-error">{message}</p>}
+      {message && <p className="form-error" role="status">{message}</p>}
     </div>
   )
 }

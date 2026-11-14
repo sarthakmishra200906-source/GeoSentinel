@@ -3,7 +3,6 @@ import cors from 'cors'
 import express from 'express'
 import mongoose from 'mongoose'
 import { randomUUID } from 'node:crypto'
-import path from 'node:path'
 import adminRoutes from './routes/admin.js'
 import rescueCenterRoutes from './routes/rescueCenters.js'
 import authRoutes from './routes/authRoutes.js'
@@ -13,6 +12,7 @@ import sosRoutes from './routes/sosRoutes.js'
 import weatherRoutes from './routes/weather.js'
 import predictionRoutes from './routes/prediction.js'
 import notificationRoutes from './routes/notifications.js'
+import simulationRoutes from './routes/simulation.js'
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js'
 
 const app = express()
@@ -44,7 +44,6 @@ app.use((request, response, next) => {
   next()
 })
 app.use(express.json())
-app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')))
 
 app.get('/api/health', (_request, response) => {
   response.json({
@@ -76,6 +75,7 @@ app.use('/api/sos', sosRoutes)
 app.use('/api/weather', weatherRoutes)
 app.use('/api/prediction', predictionRoutes)
 app.use('/api/notifications', notificationRoutes)
+app.use('/api/simulation', simulationRoutes)
 app.use(notFoundHandler)
 app.use(errorHandler)
 

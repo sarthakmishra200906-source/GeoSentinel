@@ -152,23 +152,29 @@
           if (!windyInstance || !windyInstance.map) return
           if (enabled) {
             if (!satelliteLayer) {
+              const satellitePane = windyInstance.map.createPane('satellitePane')
+              satellitePane.style.zIndex = '250'
+              satellitePane.style.pointerEvents = 'none'
               satelliteLayer = L.tileLayer(
                 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
                 {
                   attribution: 'Tiles &copy; Esri',
                   maxZoom: 19,
-                  opacity: 0.88,
-                  zIndex: 2,
+                  opacity: 1,
+                  pane: 'satellitePane',
                 }
               )
             }
             if (!windyInstance.map.hasLayer(satelliteLayer)) {
               satelliteLayer.addTo(windyInstance.map)
             }
+            satelliteLayer.bringToFront()
+            updateIndicator('<span>🛰️ Esri satellite imagery active</span>', '#38bdf8')
           } else {
             if (satelliteLayer && windyInstance.map.hasLayer(satelliteLayer)) {
               windyInstance.map.removeLayer(satelliteLayer)
             }
+            updateIndicator('<span>💨 Wind Streamlines Active</span>', 'rgba(255, 255, 255, 0.2)')
           }
         }
 
@@ -217,26 +223,26 @@
               poly.addTo(cycloneLayerGroup)
             }
 
-            // 2. Warning zone circle (orange)
-            const warningRadius = (storm.radiiKm?.warning || 150) * 1000
-            L.circle(eye, {
-              radius: warningRadius,
-              color: '#f97316',
-              fillColor: '#ea580c',
-              fillOpacity: 0.16,
-              weight: 2,
-              dashArray: '5, 5',
-            }).addTo(cycloneLayerGroup)
-
-            // 3. Danger core circle (red)
-            const dangerRadius = (storm.radiiKm?.danger || 75) * 1000
-            L.circle(eye, {
-              radius: dangerRadius,
-              color: '#dc2626',
-              fillColor: '#b91c1c',
-              fillOpacity: 0.28,
-              weight: 2,
-            }).addTo(cycloneLayerGroup)
+            // GDACS does not always publish wind radii; never invent warning zones.
+            if (storm.radiiKm?.warning) {
+              L.circle(eye, {
+                radius: storm.radiiKm.warning * 1000,
+                color: '#f97316',
+                fillColor: '#ea580c',
+                fillOpacity: 0.16,
+                weight: 2,
+                dashArray: '5, 5',
+              }).addTo(cycloneLayerGroup)
+            }
+            if (storm.radiiKm?.danger) {
+              L.circle(eye, {
+                radius: storm.radiiKm.danger * 1000,
+                color: '#dc2626',
+                fillColor: '#b91c1c',
+                fillOpacity: 0.28,
+                weight: 2,
+              }).addTo(cycloneLayerGroup)
+            }
 
             // 4. Animated spinning cyclone eye icon
             const cleanName = (storm.name || 'Cyclone').replace(/^🌀\s*/, '')

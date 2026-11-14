@@ -5,10 +5,10 @@ import GuidelineDocument from '../models/GuidelineDocument.js'
 import AuditEvent from '../models/AuditEvent.js'
 import crypto from 'node:crypto'
 import multer from 'multer'
-import pdfParse from 'pdf-parse'
 import { requireAdmin } from '../middleware/admin.js'
 import { recordAuditEvent } from '../services/audit.js'
 import mongoose from 'mongoose'
+import { extractPdfText, isReadableText } from '../services/pdfTextExtraction.js'
 
 const router = Router()
 const documentUpload = multer({
@@ -34,23 +34,24 @@ router.get('/health', ...requireAdmin, async (_request, response) => {
     mongodb: mongoose.connection.readyState === 1 ? 'online' : 'offline',
     ml,
     weather: process.env.OPENWEATHER_API_KEY ? 'configured' : 'offline',
-    llm: process.env.GOOGLE_GEMINI_API_KEY || process.env.LLM_API_KEY ? 'configured' : 'offline',
+    llm: process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.LLM_API_KEY ? 'configured' : 'offline',
+    llmProvider: (process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || (!process.env.LLM_API_URL && process.env.LLM_API_KEY))
+      ? 'gemini'
+      : process.env.LLM_API_URL
+        ? 'openai-compatible'
+        : 'offline',
     checkedAt: new Date().toISOString(),
   })
 })
 
-function chunkText(text, size = 900, overlap = 120) {
+function chunkText(pages, size = 900, overlap = 120) {
   const chunks = []
-  const pages = text.split('\f')
-  pages.forEach((pageText, pageIndex) => {
+  pages.forEach(({ page: pageNumber, text: pageText }) => {
     for (let start = 0; start < pageText.length; start += size - overlap) {
       const chunk = pageText.slice(start, start + size).trim()
-      if (chunk) chunks.push({ text: chunk, section: 'Uploaded document', page: pageIndex + 1 })
+      if (chunk) chunks.push({ text: chunk, section: 'Uploaded document', page: pageNumber })
     }
   })
-  if (!chunks.length && text.trim()) {
-    chunks.push({ text: text.trim(), section: 'Uploaded document', page: null })
-  }
   return chunks
 }
 
@@ -148,18 +149,29 @@ router.post('/guidelines', ...requireAdmin, documentUpload.single('document'), a
     }
     const checksum = crypto.createHash('sha256').update(request.file.buffer).digest('hex')
     let rawText
+    let pages
+    let extractionMethod = 'text'
     if (request.file.mimetype === 'application/pdf') {
       if (!request.file.buffer.subarray(0, 5).equals(Buffer.from('%PDF-'))) {
         response.status(415).json({ error: 'The uploaded PDF signature is invalid' })
         return
       }
-      const parsed = await pdfParse(request.file.buffer)
-      rawText = parsed.text.replace(/\u0000/g, '').trim()
+      const extracted = await extractPdfText(request.file.buffer)
+      pages = extracted.pages
+      extractionMethod = extracted.method
+      rawText = pages.map(({ text }) => text).join('\f').trim()
     } else {
       rawText = request.file.buffer.toString('utf8').replace(/\u0000/g, '').trim()
+      pages = [{ page: 1, text: rawText }]
     }
     if (!rawText) {
       response.status(422).json({ error: 'The document contains no extractable text' })
+      return
+    }
+    if (!isReadableText(rawText)) {
+      response.status(422).json({
+        error: 'The document could not be read even after OCR. Upload a clearer searchable PDF or UTF-8 text file; this document was not indexed.',
+      })
       return
     }
     const document = await GuidelineDocument.create({
@@ -174,8 +186,10 @@ router.post('/guidelines', ...requireAdmin, documentUpload.single('document'), a
       checksum,
       fileName: request.file.originalname,
       mimeType: request.file.mimetype,
+      extractionStatus: 'readable',
+      extractionMethod,
       rawText,
-      chunks: chunkText(rawText),
+      chunks: chunkText(pages),
       uploadedBy: request.user._id,
     })
     await recordAuditEvent({
@@ -241,7 +255,41 @@ router.patch('/guidelines/:id', ...requireAdmin, async (request, response, next)
       newStatus: status,
       reason: request.body.reason || '',
     })
+
     response.json(document)
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.delete('/guidelines/:id', ...requireAdmin, async (request, response, next) => {
+  try {
+    const document = await GuidelineDocument.findById(request.params.id).select('title status')
+    if (!document) {
+      response.status(404).json({ error: 'Guideline not found' })
+      return
+    }
+    const confirmationEmail = String(request.body.confirmationEmail || '').trim().toLowerCase()
+    const confirmationTitle = String(request.body.confirmationTitle || '').trim()
+    if (!/^[^@\s]+@gmail\.com$/i.test(confirmationEmail) || confirmationEmail !== String(request.user.email || '').trim().toLowerCase()) {
+      response.status(403).json({ error: 'Enter the signed-in administrator Gmail address exactly to delete this document' })
+      return
+    }
+    if (confirmationTitle !== document.title) {
+      response.status(400).json({ error: 'Enter the exact document title to confirm deletion' })
+      return
+    }
+    await GuidelineDocument.deleteOne({ _id: document._id })
+    await recordAuditEvent({
+      request,
+      actor: request.user._id,
+      action: 'guideline.delete',
+      targetType: 'GuidelineDocument',
+      targetId: document._id,
+      oldStatus: document.status,
+      reason: `Confirmed by ${confirmationEmail}`,
+    })
+    response.json({ deleted: true })
   } catch (error) {
     next(error)
   }

@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
+import argparse
 import sys
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import quote
 from collections.abc import Callable
+from pathlib import Path
 
 
 BACKEND = "http://127.0.0.1:5000"
 ML = "http://127.0.0.1:8000"
-FRONTEND = "http://127.0.0.1:5173/GeoSentinel/"
+FRONTEND = "http://localhost:5173/GeoSentinel/"
 
 
 def request(
@@ -29,6 +32,8 @@ def request(
             return response.status, dict(response.headers), response.read()
     except urllib.error.HTTPError as error:
         return error.code, dict(error.headers), error.read()
+    except urllib.error.URLError as error:
+        return 0, {}, json.dumps({"error": str(error.reason)}).encode()
 
 
 def check(name: str, action: Callable[[], bool]) -> bool:
@@ -41,8 +46,48 @@ def check(name: str, action: Callable[[], bool]) -> bool:
     return passed
 
 
+def json_request(
+    url: str, method: str = "GET", payload: dict | None = None
+) -> tuple[int, dict]:
+    body = json.dumps(payload).encode() if payload is not None else None
+    status, _, raw = request(
+        url,
+        method=method,
+        body=body,
+        headers={"Content-Type": "application/json"} if body else None,
+    )
+    try:
+        return status, json.loads(raw)
+    except json.JSONDecodeError:
+        return status, {}
+
+
+def show_live_result(name: str, status: int, payload: dict) -> None:
+    preview = json.dumps(payload, ensure_ascii=True)
+    if len(preview) > 500:
+        preview = f"{preview[:500]}..."
+    print(f"\n[LIVE] {name} HTTP {status}\n{preview}")
+
+
 def main() -> int:
-    model_path = "Backend/ml_service/model/flood-risk-baseline.json"
+    global BACKEND, ML, FRONTEND
+    default_backend = BACKEND
+    default_ml = ML
+    default_frontend = FRONTEND
+    parser = argparse.ArgumentParser(description="Check live local GeoSentinel services.")
+    parser.add_argument("--backend", default=default_backend, help="Express base URL")
+    parser.add_argument("--ml", default=default_ml, help="FastAPI base URL")
+    parser.add_argument("--frontend", default=default_frontend, help="Frontend URL")
+    parser.add_argument("--state", default="Odisha", help="State used for trend verification")
+    args = parser.parse_args()
+    backend = args.backend.rstrip("/")
+    ml = args.ml.rstrip("/")
+    frontend = args.frontend
+    BACKEND = backend
+    ML = ml
+    FRONTEND = frontend
+
+    model_path = Path(__file__).resolve().parents[1] / "Backend" / "ml_service" / "model" / "flood-risk-baseline.json"
     try:
         with open(model_path, encoding="utf-8") as model_file:
             model = json.load(model_file)
@@ -69,6 +114,21 @@ def main() -> int:
     if registration[0] == 201:
         ordinary_token = json.loads(registration[2]).get("token")
     ordinary_headers = {"Authorization": f"Bearer {ordinary_token}"} if ordinary_token else {}
+
+    dashboard_result = json_request(f"{BACKEND}/api/weather/dashboard")
+    states_result = json_request(f"{BACKEND}/api/weather/states")
+    trends_result = json_request(
+        f"{BACKEND}/api/weather/trends?state={quote(args.state)}"
+    )
+    live_prediction_result = json_request(
+        f"{BACKEND}/api/prediction",
+        method="POST",
+        payload={"latitude": 20.2961, "longitude": 85.8245},
+    )
+    show_live_result("weather dashboard", *dashboard_result)
+    show_live_result("state matrix", *states_result)
+    show_live_result("state trends", *trends_result)
+    show_live_result("map prediction", *live_prediction_result)
 
     results = [
         check(
@@ -185,6 +245,24 @@ def main() -> int:
             body=b'{"features": {}}',
             headers={"Content-Type": "application/json"},
         )[0] in (422, 503)),
+        check(
+            "live dashboard returns monitored cities",
+            lambda: dashboard_result[0] == 200 and bool(dashboard_result[1].get("cities")),
+        ),
+        check(
+            "live state endpoint returns state matrix",
+            lambda: states_result[0] == 200 and bool(states_result[1].get("states")),
+        ),
+        check(
+            "live trend endpoint returns monthly data",
+            lambda: trends_result[0] == 200 and bool(trends_result[1].get("months")),
+        ),
+        check(
+            "live map prediction returns separated risk signals",
+            lambda: live_prediction_result[0] == 200
+            and "rain_outlook" in live_prediction_result[1]
+            and "active_flood_risk" in live_prediction_result[1],
+        ),
     ]
     passed = sum(results)
     print(f"\n{passed}/{len(results)} smoke checks passed")

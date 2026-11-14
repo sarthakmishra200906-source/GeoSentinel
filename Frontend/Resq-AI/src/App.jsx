@@ -1,10 +1,12 @@
 import React, { Component } from 'react'
 import Navbar from './component/navbar'
 import MapContainer from './component/MapContainer'
+import AdminDashboard from './component/AdminDashboard'
 import './App.css'
 
 export default class App extends Component {
   state = {
+    activeView: 'map',
     user: (() => {
       const storedUser = localStorage.getItem('resq-ai-user')
       if (!storedUser) return null
@@ -30,16 +32,27 @@ export default class App extends Component {
     this.setState({ token: null, user: null })
   }
 
+  handleNavigate = (activeView) => {
+    this.setState({ activeView })
+  }
+
   render() {
+    const isAdminView = this.state.activeView === 'admin'
     return (
-      <div>
+      <div className={isAdminView ? 'app-shell admin-view-active' : 'app-shell'}>
         <Navbar
           user={this.state.user}
           token={this.state.token}
           onAuthenticated={this.handleAuthenticated}
           onLogout={this.handleLogout}
+          activeView={this.state.activeView}
+          onNavigate={this.handleNavigate}
         />
-        <MapContainer />
+        {isAdminView ? (
+          <AdminDashboard token={this.state.token} onSwitchToMap={() => this.handleNavigate('map')} />
+        ) : (
+          <MapContainer />
+        )}
       </div>
     )
   }

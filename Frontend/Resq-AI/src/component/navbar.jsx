@@ -2,7 +2,6 @@ import React, { Component } from 'react'
 import Login from './login'
 import Register from './regester'
 import NavigationCard from './NavigationCard'
-import AdminDashboard from './AdminDashboard'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
@@ -124,14 +123,6 @@ export default class Navbar extends Component {
       )
     }
 
-    if (activeCard === 'admin') {
-      return (
-        <NavigationCard title="Admin dashboard" onClose={this.closeCard}>
-          <AdminDashboard token={this.props.token} />
-        </NavigationCard>
-      )
-    }
-
     const content = cardContent[activeCard]
     return (
       <NavigationCard title={content.title} onClose={this.closeCard}>
@@ -168,8 +159,13 @@ export default class Navbar extends Component {
             {user ? (
               <>
                 {user.role === 'admin' && (
-                  <button className="menu-item" type="button" onClick={() => this.openCard('admin')}>
+                  <button className="menu-item" type="button" onClick={() => this.props.onNavigate('admin')}>
                     Admin dashboard
+                  </button>
+                )}
+                {this.props.activeView === 'admin' && (
+                  <button className="menu-item" type="button" onClick={() => this.props.onNavigate('map')}>
+                    Map
                   </button>
                 )}
                 <button className="menu-item" type="button" onClick={() => this.openCard('ai')}>

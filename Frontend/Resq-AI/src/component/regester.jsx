@@ -8,6 +8,7 @@ export default class Register extends Component {
     email: '',
     phone: '',
     password: '',
+    showPassword: false,
     age: '',
     gender: 'Other',
     address: '',
@@ -49,7 +50,10 @@ export default class Register extends Component {
         <label htmlFor="register-phone">Phone</label>
         <input id="register-phone" type="tel" value={this.state.phone} onChange={this.update('phone')} required />
         <label htmlFor="register-password">Password</label>
-        <input id="register-password" type="password" value={this.state.password} onChange={this.update('password')} required />
+        <div className="password-field">
+          <input id="register-password" type={this.state.showPassword ? 'text' : 'password'} value={this.state.password} onChange={this.update('password')} required />
+          <button type="button" onClick={() => this.setState({ showPassword: !this.state.showPassword })}>{this.state.showPassword ? 'Hide' : 'Show'}</button>
+        </div>
         <label htmlFor="register-age">Age</label>
         <input id="register-age" type="number" min="0" max="130" value={this.state.age} onChange={this.update('age')} required />
         <label htmlFor="register-gender">Gender</label>

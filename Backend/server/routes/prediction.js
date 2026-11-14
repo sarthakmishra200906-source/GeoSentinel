@@ -40,65 +40,51 @@ async function fetchJson(url, options = {}) {
 }
 
 async function fetchWeather({ latitude, longitude }) {
-  if (process.env.OPENWEATHER_API_KEY) {
-    try {
-      const url = new URL('https://api.openweathermap.org/data/2.5/weather')
-      url.searchParams.set('lat', latitude)
-      url.searchParams.set('lon', longitude)
-      url.searchParams.set('appid', process.env.OPENWEATHER_API_KEY)
-      url.searchParams.set('units', 'metric')
-      const data = await fetchJson(url)
-      return {
-        latitude,
-        longitude,
-        temperature: Math.round(data.main.temp * 10) / 10,
-        feelsLike: Math.round(data.main.feels_like * 10) / 10,
-        humidity: data.main.humidity,
-        pressure: data.main.pressure,
-        windSpeed: Math.round((data.wind.speed || 0) * 3.6),
-        rainfall1h: data.rain?.['1h'] || 0,
-        cloudCover: data.clouds?.all ?? 0,
-        condition: data.weather?.[0]?.description || 'Clear',
-        observedAt: data.dt ? new Date(data.dt * 1000).toISOString() : new Date().toISOString(),
-      }
-    } catch (_) {
-      // Fallback to Open-Meteo
-    }
-  }
+  const forecastUrl = new URL('https://api.open-meteo.com/v1/forecast')
+  forecastUrl.searchParams.set('latitude', latitude)
+  forecastUrl.searchParams.set('longitude', longitude)
+  forecastUrl.searchParams.set(
+    'current',
+    'temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,rain,surface_pressure,wind_speed_10m',
+  )
+  forecastUrl.searchParams.set('hourly', 'precipitation_probability,precipitation,wind_speed_10m')
+  forecastUrl.searchParams.set('daily', 'precipitation_sum,precipitation_probability_max,wind_speed_10m_max')
+  forecastUrl.searchParams.set('forecast_days', '3')
+  forecastUrl.searchParams.set('timezone', 'UTC')
+  const floodUrl = new URL('https://flood-api.open-meteo.com/v1/flood')
+  floodUrl.searchParams.set('latitude', latitude)
+  floodUrl.searchParams.set('longitude', longitude)
+  floodUrl.searchParams.set('daily', 'river_discharge,river_discharge_max')
+  floodUrl.searchParams.set('forecast_days', '3')
+  floodUrl.searchParams.set('timezone', 'UTC')
 
-  // Open-Meteo fallback
-  try {
-    const omUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,rain,surface_pressure,wind_speed_10m,cloud_cover`
-    const omData = await fetchJson(omUrl)
-    const cur = omData.current || {}
-    return {
-      latitude,
-      longitude,
-      temperature: Math.round((cur.temperature_2m ?? 25) * 10) / 10,
-      feelsLike: Math.round((cur.apparent_temperature ?? cur.temperature_2m ?? 25) * 10) / 10,
-      humidity: cur.relative_humidity_2m ?? 60,
-      pressure: Math.round(cur.surface_pressure ?? 1012),
-      windSpeed: Math.round((cur.wind_speed_10m || 0) * 10) / 10,
-      rainfall1h: cur.rain ?? cur.precipitation ?? 0,
-      cloudCover: cur.cloud_cover ?? 10,
-      condition: (cur.rain ?? cur.precipitation ?? 0) > 0 ? 'Rain' : 'Clear',
-      observedAt: new Date().toISOString(),
-    }
-  } catch (_) {
-    // Offline baseline
-    return {
-      latitude,
-      longitude,
-      temperature: 26,
-      feelsLike: 27,
-      humidity: 65,
-      pressure: 1012,
-      windSpeed: 15,
-      rainfall1h: 0,
-      cloudCover: 20,
-      condition: 'Clear',
-      observedAt: new Date().toISOString(),
-    }
+  const [forecast, flood] = await Promise.all([fetchJson(forecastUrl), fetchJson(floodUrl)])
+  const current = forecast.current || {}
+  const daily = forecast.daily || {}
+  const hourlyRain = (forecast.hourly?.precipitation || []).map(Number).filter(Number.isFinite)
+  const dailyRain = (daily.precipitation_sum || []).map(Number).filter(Number.isFinite)
+  const discharge = (flood.daily?.river_discharge || []).map(Number).filter(Number.isFinite)
+  const dischargeMax = (flood.daily?.river_discharge_max || []).map(Number).filter(Number.isFinite)
+  const windMax = (daily.wind_speed_10m_max || []).map(Number).filter(Number.isFinite)
+  return {
+    latitude,
+    longitude,
+    temperature: Number(current.temperature_2m),
+    feelsLike: Number(current.apparent_temperature),
+    humidity: Number(current.relative_humidity_2m),
+    pressure: Number(current.surface_pressure),
+    windSpeed: Number(current.wind_speed_10m),
+    windSpeedMax: windMax.length ? Math.max(...windMax) : Number(current.wind_speed_10m),
+    rainfall1h: Number(current.rain ?? current.precipitation ?? 0),
+    precipitationSum: dailyRain[0] || 0,
+    rain72h: dailyRain.reduce((total, value) => total + value, 0) || hourlyRain.reduce((total, value) => total + value, 0),
+    rainChance: Math.max(...(daily.precipitation_probability_max || [0]).map(Number)),
+    rainAmountMm: dailyRain.reduce((total, value) => total + value, 0),
+    riverDischarge: discharge[0] || 0,
+    riverDischargeMax: dischargeMax[0] || 0,
+    condition: Number(current.rain ?? current.precipitation ?? 0) > 0 ? 'Rain' : 'Clear',
+    observedAt: current.time || new Date().toISOString(),
+    provider: 'Open-Meteo weather + Global Flood',
   }
 }
 
@@ -117,7 +103,7 @@ async function predict(weather, status = 'SIMULATED') {
   return {
     ...prediction,
     status: status === 'SIMULATED' ? prediction.status : prediction.status,
-    source: 'OpenWeather-derived features',
+    source: 'Open-Meteo weather + Global Flood telemetry',
     weather,
     generatedAt: new Date().toISOString(),
   }

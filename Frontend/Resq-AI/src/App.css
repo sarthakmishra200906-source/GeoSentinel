@@ -1336,6 +1336,43 @@ body,
   overflow: hidden;
 }
 
+.app-shell {
+  min-height: 100vh;
+}
+
+.admin-view-active {
+  height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: #f8fafc;
+}
+
+.admin-view-active .map-menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 224px;
+  box-sizing: border-box;
+  align-items: stretch;
+  z-index: 1200;
+  padding: 16px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+}
+
+.admin-view-active .map-menu .menu {
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.admin-view-active .map-menu .menu-item {
+  width: 100%;
+  text-align: left;
+}
+
 .map-menu {
   position: fixed;
   top: 16px;
@@ -1451,6 +1488,217 @@ body,
 
 .navigation-card-content p {
   margin: 0 0 16px;
+}
+
+.admin-view-active .admin-dashboard {
+  width: min(1120px, calc(100% - 48px));
+  margin: 0 auto 0 272px;
+  padding: 32px 0 64px;
+}
+
+.weather-report {
+  margin: 28px 0;
+  padding: 20px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+}
+
+.weather-report-header,
+.weather-report-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.weather-report-header h3 {
+  margin-top: 0;
+}
+
+.weather-report-header p {
+  color: #475569;
+}
+
+.model-readiness {
+  display: grid;
+  gap: 4px;
+  min-width: 250px;
+  padding: 12px;
+  border-radius: 8px;
+  color: #166534;
+  background: #f0fdf4;
+  font-size: 0.85rem;
+}
+
+.weather-report-summary {
+  justify-content: flex-start;
+  margin: 18px 0;
+}
+
+.weather-report-card {
+  flex: 1;
+  min-width: 150px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.weather-report-card.risk-card {
+  color: #14532d;
+  background: linear-gradient(135deg, #ecfdf5, #dcfce7);
+  border: 1px solid #bbf7d0;
+}
+
+.weather-report-card.risk-card small {
+  display: block;
+  margin-top: 5px;
+  color: #166534;
+  font-size: 0.75rem;
+}
+
+.weather-report-card.risk-high,
+.weather-report-card.risk-critical {
+  color: #991b1b;
+  background: linear-gradient(135deg, #fff1f2, #fee2e2);
+  border-color: #fecaca;
+}
+
+.weather-report-card.risk-high small,
+.weather-report-card.risk-critical small {
+  color: #b91c1c;
+}
+
+.analytics-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.analytics-chart {
+  min-width: 0;
+  min-height: 320px;
+  padding: 1.25rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: linear-gradient(145deg, #ffffff, #f8fafc);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.07);
+}
+
+.analytics-chart canvas {
+  max-height: 245px;
+}
+
+.analytics-chart-risk {
+  grid-column: span 2;
+}
+
+.analytics-chart h4 {
+  margin: 0 0 1rem;
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.analytics-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: end;
+}
+
+@media (max-width: 760px) {
+  .analytics-chart-risk {
+    grid-column: span 1;
+  }
+}
+
+@media print {
+  .admin-dashboard-toolbar,
+  .analytics-actions,
+  .admin-sidebar,
+  button,
+  form {
+    display: none !important;
+  }
+}
+
+.weather-report-card span,
+.weather-report-card strong {
+  display: block;
+}
+
+.weather-report-card span {
+  color: #475569;
+  font-size: 0.85rem;
+}
+
+.weather-report-card strong {
+  margin-top: 6px;
+  color: #0f172a;
+  font-size: 1.35rem;
+}
+
+.weather-bar,
+.weather-inline-bar {
+  display: block;
+  height: 7px;
+  margin-top: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dbeafe;
+}
+
+.weather-bar i,
+.weather-inline-bar b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #0284c7;
+}
+
+.weather-city-table {
+  overflow-x: auto;
+}
+
+.weather-city-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1.1fr 1fr 0.8fr 1.6fr;
+  gap: 12px;
+  min-width: 760px;
+  padding: 10px 0;
+  border-bottom: 1px solid #e2e8f0;
+  color: #334155;
+  font-size: 0.85rem;
+}
+
+.weather-city-heading {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.weather-inline-bar {
+  display: inline-block;
+  width: 70px;
+  margin: 0 0 0 6px;
+  vertical-align: middle;
+}
+
+.admin-dashboard-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+.admin-dashboard-toolbar h2 {
+  margin: 0 0 8px;
+  color: #0f172a;
+}
+
+.admin-dashboard-toolbar p {
+  margin: 0;
+  color: #475569;
 }
 
 .auth-form {
@@ -1573,6 +1821,23 @@ body,
   .map-menu {
     top: 12px;
     left: 12px;
+  }
+
+  .admin-view-active .map-menu {
+    position: sticky;
+    width: auto;
+    min-height: auto;
+    bottom: auto;
+  }
+
+  .admin-view-active .admin-dashboard {
+    width: calc(100% - 36px);
+    margin: 0 auto;
+  }
+
+  .weather-report-header,
+  .weather-report-summary {
+    flex-direction: column;
   }
 
   .nav-toggle {

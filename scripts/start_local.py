@@ -7,6 +7,8 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 
@@ -25,12 +27,25 @@ SERVICES = [
         [NPM, "run", "dev", "--", "--host", "localhost"],
     ),
 ]
+HEALTH_URLS = {
+    "backend": "http://127.0.0.1:5000/api/health",
+    "ml": "http://127.0.0.1:8000/health",
+    "frontend": "http://localhost:5173/GeoSentinel/",
+}
 
 
 def stream_output(name: str, process: subprocess.Popen[str]) -> None:
     assert process.stdout is not None
     for line in process.stdout:
         print(f"[{name}] {line}", end="", flush=True)
+
+
+def service_is_healthy(url: str) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=2) as response:
+            return response.status == 200
+    except (OSError, urllib.error.URLError):
+        return False
 
 
 def stop_processes(processes: list[tuple[str, subprocess.Popen[str]]]) -> None:
@@ -54,6 +69,9 @@ def main() -> int:
     processes: list[tuple[str, subprocess.Popen[str]]] = []
     try:
         for name, directory, command in SERVICES:
+            if service_is_healthy(HEALTH_URLS[name]):
+                print(f"Reusing healthy {name} service already running at {HEALTH_URLS[name]}")
+                continue
             print(f"Starting {name}: {' '.join(command)}")
             process = subprocess.Popen(
                 command,

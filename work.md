@@ -7,6 +7,32 @@ an invented emergency instruction is more harmful than a feature being absent.
 
 ## 1. Current baseline
 
+### Simulation implementation status (Revision 2)
+
+The simulation scope is currently **Odisha-only for testing**, with an
+extensible geography field for later India-wide expansion. It is a
+rule-based district/institutional decision-support matrix, not a hydrodynamic
+model and must not claim cell-level water-depth or official forecast accuracy.
+Simulation data is synthetic and isolated from live weather, cyclone, SOS,
+reports, notifications, rescue inventory, and RAG documents.
+
+The foundation phase has started:
+
+- Added `SimulationScenario` and `SimulationRun` models with synthetic
+  provenance, Odisha geography, versioned ruleset, deterministic seed, run
+  lifecycle, clock mode, sequence, and owner heartbeat fields.
+- Added admin-only `/api/simulation/scenarios` create/list endpoints.
+- Added admin-only `/api/simulation/runs` creation and owner pause endpoint.
+- Added strict scenario parameter bounds for cyclone, rainfall, and demo
+  capacity budgets.
+- Added audit events for scenario creation, run creation, and pause actions.
+- Added explicit `simulationMode` response markers.
+
+Not implemented yet: the time-step engine, time-series collection,
+WebSocket/SSE stream, live-vs-simulation context middleware, resource locking,
+reports/object storage, insights, historical calibration, or ML review flow.
+Do not add those surfaces by bypassing the models and audit boundary above.
+
 ### Already present
 
 - React/Vite frontend with an India-centered Leaflet weather map.
@@ -468,8 +494,8 @@ outside the local phase.
 2. Confirm the Kaggle competition license/terms and document provenance before
    distributing or deploying any derived artifact.
 3. Add a production malware scanner and durable object-storage adapter for
-   guideline and report uploads; local PDF extraction now rejects invalid or
-   empty documents but is not a production scanning boundary.
+   guideline and report uploads; local PDF extraction now rejects invalid,
+   empty, or unreadable documents but is not a production scanning boundary.
 4. Configure and validate an approved LLM provider, including provider-side
    quotas and monitoring. Without it, chat returns an explicit provider status.
 5. Configure Atlas, secrets management, staging, load testing, monitoring,
@@ -502,6 +528,61 @@ locally.
 
 The exact-location weather endpoint was verified at Delhi coordinates and
 returned a live temperature, precipitation value, wind speed, and condition.
+
+### Latest local completion update
+
+- [x] Admin analytics now presents polished rainfall, heat, river, and active
+  flood-risk charts with clear live-risk cards.
+- [x] Active flood risk is displayed from current rain, river, pressure, and
+  wind telemetry; it is not confused with forecast rain outlook.
+- [x] RAG retrieval only uses documents marked `extractionStatus: readable`,
+  avoids reloading full raw documents during chat, removes common retrieval
+  stop words, supports phrase matches, and retrieves up to eight relevant
+  chunks.
+- [x] PDF ingestion rejects unreadable font-encoded/scanned PDFs with an
+  automatic OCR fallback using `pdfjs-dist`, `@napi-rs/canvas`, and
+  `tesseract.js`; page numbers now come from the PDF page objects.
+- [x] Admins can delete a guideline only after two browser confirmations and
+  manually entering the signed-in administrator email plus the exact document
+  title; deletion is audited.
+- [x] Login and registration have password visibility controls. Password
+  recovery now supports expiring hashed tokens and SMTP delivery; local
+  development requires an explicit `PASSWORD_RESET_DEV_MODE` opt-in.
+- [x] Emergency report listing and report images are no longer public; they
+  require administrator authorization.
+- [x] Direct admin self-registration is disabled in the local environment and
+  example configuration.
+- [x] Backend tests pass and the live local smoke suite passes 19/19.
+
+The previously uploaded `Disaster_Mgt_Plan_SSD_Deptt.pdf` should be deleted from
+the Admin Dashboard and uploaded again. The new OCR fallback was verified
+against that source: it detected 36 real pages and produced readable OCR text,
+so page citations will no longer be fabricated from control-character form
+feeds. The five document-specific RAG questions still require re-upload,
+approval, and browser verification.
+
+### Remaining tasks before database-server deployment
+
+1. Re-upload and approve a readable/OCR version of the disaster guideline;
+   verify all five RAG questions, citations, annexure contacts, and the clean
+   `NO_SUPPORT` refusal.
+2. Add automated RAG fixture tests covering exact amounts, multi-step SOPs,
+   tables/annexures, citations, prompt injection, and unsupported questions.
+3. Complete flood-model calibration and domain review using verified flood
+   observations; do not use the proxy score as an official alert.
+4. Configure MongoDB Atlas production URI, indexes, backups, restore drill,
+   retention policy, and durable object storage for uploaded files.
+5. Configure production secrets management, rotate exposed development keys,
+   disable `ALLOW_ADMIN_REGISTRATION`, and restrict CORS to deployed origins.
+6. Add malware scanning, rate limits, request-size limits, monitoring,
+   structured logs, provider quotas, and alerting for MongoDB, weather, ML,
+   and LLM failures.
+7. Deploy staging, run the full smoke suite plus load/failure tests, verify
+   rollback, then promote a tagged production release.
+8. Resolve the current high-severity `sharp` dependency audit finding through
+   an approved upgrade or replacement, then rerun `npm audit`.
+9. Configure a real SMTP provider and verify password-reset delivery without
+   enabling development reset-token responses.
 
 ### Next implementation step after the checklist
 
@@ -594,8 +675,8 @@ score or public grounded-chat claim before its corresponding phase gate passes.
 
 - Daily forecast cards require the optional OpenWeather key. Windy remains the
   primary visual map and picker source when OpenWeather is unavailable.
-- Cyclone status uses configured backend storm tracks; no storm track is
-  invented when none is configured.
+- Cyclone status uses current GDACS events only; expired, unrelated, unavailable,
+  or provider-missing events produce no cyclone marker.
 - The daily forecast route is wired and reachable locally; the current
   OpenWeather credential returned HTTP 429 during verification, so the UI
   correctly keeps the daily forecast marked optional/unavailable rather than
@@ -620,7 +701,9 @@ score or public grounded-chat claim before its corresponding phase gate passes.
   - Integrated OpenWeather with automatic Open-Meteo live global weather fallback to ensure 100% telemetry availability without 503 or 429 rate limit errors.
   - Displays a 5-day daily forecast overview along with AI flood & hydrology risk classification and probability scores.
 - **Worldwide Active Tropical Cyclones on Windy Map:**
-  - Configured 7 global cyclones/typhoons with active trajectories, warning/danger radii, animated spinning eye markers, and clickable storm dossiers across North Indian Ocean, Arabian Sea, Western Pacific, Philippine Sea, South Indian Ocean, Caribbean, and South Pacific.
+  - Added live GDACS cyclone event handling with strict date and India-region
+    filtering. Provider coordinates are displayed without fabricated tracks or
+    warning radii.
   - Added a `🌀 Jump to Cyclone…` dropdown on Windy map for instant navigation to any active cyclone.
 - **Normal / Street Map Cleaned & Enhanced with City Weather Hubs:**
   - Completely removed the rescue center search bar and rescue center pins from the normal map.
@@ -629,11 +712,230 @@ score or public grounded-chat claim before its corresponding phase gate passes.
 - **Production Build:**
   - Verified clean compilation with Vite (`npm run build`), producing optimized JS and CSS bundles without errors.
 
-### Work still to be done
+### Work completed in this cycle
 
-1. Add automated Cypress / Playwright tests verifying Windy overlay toggles (wind, heat, rain, satellite) and city weather hub popups on the street map.
-2. Fine-tune and calibrate the machine learning flood-risk regression/classification model against multi-year local river gauge and rainfall telemetry.
-3. Wire real-time SMS / Push / Email emergency broadcasts to the notification pipeline for critical risk tiers.
-4. Finalize the user-side grounded LLM assistant for non-cached approved emergency guidance with verifiable citations.
-5. Implement administrative audit logs for disaster simulation triggers and team incident reviews.
-6. Conduct security hardening (disable admin self-registration, enable strict CORS, enforce rate limiting) before production deployment.
+- Removed all embedded cyclone records from the backend.
+- Removed fabricated cyclone forecast points, warning radii, fallback wind, pressure,
+  and landfall data. The map now draws only the live GDACS event position.
+- Added strict GDACS date validation and India-region filtering. Expired events,
+  unrelated global events, and unavailable feeds return an empty cyclone list.
+- Added physical Open-Meteo weather and Global Flood telemetry to the prediction
+  contract and calibrated thresholds from 20,090 historical rows per source.
+- Added full-screen admin navigation, scrolling, live India/city weather report,
+  river discharge, and flood-risk display.
+- Verified frontend build, backend syntax, backend tests, and telemetry calibration.
+- Updated `scripts\smoke_local.py` to print live dashboard, state-matrix,
+  monthly-trend, and map-prediction JSON previews and fail unless the new
+  analytics and separated risk fields are reachable.
+- Ran the updated local stack against live providers: all 19 smoke checks
+  passed, including frontend, backend, FastAPI, dashboard, state matrix,
+  Odisha monthly trends, and Bhubaneswar separated-risk prediction.
+- Fixed Gemini provider selection to accept `GOOGLE_GEMINI_API_KEY`,
+  `GEMINI_API_KEY`, `GOOGLE_API_KEY`, and legacy `LLM_API_KEY` fallback when no
+  alternate LLM URL is configured. Admin health now reports the selected LLM
+  provider without exposing credentials.
+- Fixed `scripts\start_local.py` port reuse: it now probes the backend, ML, and
+  frontend health URLs and reuses healthy existing processes instead of
+  launching duplicate services. This resolves Windows `WinError 10048` on port
+  8000 and prevents accidental Vite fallback to port 5174.
+- Added ordered Gemini model fallback and provider/model reporting in grounded
+  chat. A direct grounded test question succeeded with Gemini using
+  `gemini-3-flash-preview`; no API key was printed.
+- Hardened the in-process FAQ/RAG cache with punctuation normalization and
+  word-boundary matching. FAQ hits return before `User.findById`,
+  `GuidelineDocument.find`, or Gemini calls; unmatched questions retain the
+  approved-document grounding path. Added three cache regression tests; backend
+  suite now passes 9/9.
+
+### Remaining before cloud deployment
+
+1. Add browser end-to-end tests for live cyclone suppression, admin navigation,
+   report loading, and RAG upload/approval.
+2. Replace proxy telemetry thresholds with verified flood observations and gauge
+   labels before treating scores as operational warnings.
+3. Add real-time SMS, push, and email delivery with provider failover and delivery
+   audit records.
+4. Configure production MongoDB backups, object storage, secrets, monitoring,
+   alerting, strict CORS, rate limits, and disable admin self-registration.
+5. Complete an incident-response runbook and validate cyclone, flood, outage, and
+   stale-data drills with disaster-management stakeholders.
+
+## 9. MVP gap register and execution plan
+
+This section supersedes older “work still to be done” notes above. It records
+what is actually implemented, what is incomplete, and the gates required before
+calling the system a deployable disaster-management MVP.
+
+### Sprint 1 — Risk engine correctness
+
+**Status: implemented as a safer proxy MVP; verified flood labels are still required.**
+
+Implemented in this cycle:
+
+- Added shared JavaScript telemetry assessment logic for dashboard readings.
+- Removed the dashboard-specific `/80` and `/2000` score formula.
+- Added separate rain outlook and active flood-risk fields and tiers.
+- Added proxy risk factors, status, and non-operational warning text.
+- Updated FastAPI telemetry output with the same separated signal names.
+
+Remaining limitation:
+
+- The FastAPI live score is a proxy formula, not a supervised flood model.
+- Forecast rain is mixed into active flood risk.
+- The admin dashboard and map do not use one shared scoring path.
+- River thresholds are not station- or basin-specific.
+- The current five-location calibration has 20,090 rainfall rows and 20,090
+  discharge rows, but no verified flood-event labels.
+
+Required implementation:
+
+1. Return separate `rain_outlook` and `active_flood_risk` objects.
+2. Keep forecast precipitation in `rain_outlook`; use observed rain, current
+   discharge, discharge percentile, pressure, and freshness for active risk.
+3. Add station/basin-specific 75th, 90th, and 98th percentile thresholds.
+4. Include elevation and telemetry timestamps.
+5. Route map clicks and admin state evaluations through one prediction service.
+6. Return `UNAVAILABLE` for missing, stale, contradictory, or failed telemetry.
+7. Add explainable factors so the UI can state why a score changed.
+8. Never show `HIGH` or `CRITICAL` from a proxy threshold as an official alert.
+
+**Acceptance gate:** a clear, dry location cannot become `CRITICAL` from
+forecast rain alone; map and admin return the same result for the same payload;
+every result includes source, timestamp, model version, status, and warnings.
+
+### Sprint 2 — State-level analytics and graphs
+
+**Status: implemented as a labeled analytics MVP; verified flood-risk history is still unavailable.**
+
+The dashboard now has Chart.js, state summaries, monthly weather trends,
+state selection, a danger matrix, river-discharge series, print-to-PDF, and CSV
+export. Flood-risk history is intentionally shown as unavailable where verified
+labels do not exist; missing data is not rendered as zero risk.
+
+Required implementation:
+
+1. Group monitoring hubs by state and basin, with an explicit data-coverage
+   label for each state.
+2. Add `GET /api/weather/states` for current state danger summaries.
+3. Add `GET /api/weather/trends?state=<name>` for 12-month historical and
+   7-day forecast series.
+4. Include monthly rainfall, monthly temperature/heat, river discharge, rain
+   outlook, active flood risk, and data completeness.
+5. Add Chart.js charts:
+   - rainfall bars plus flood-risk line;
+   - temperature/heat-stress line;
+   - discharge versus local warning threshold;
+   - state danger matrix.
+6. Add state selector, loading/error/empty states, source/freshness badges,
+   print-to-PDF, and CSV/JSON export.
+
+Completed now: items 1–3, Chart.js visualizations, state selector, print
+report, and CSV export. Remaining: richer loading/empty states, state-specific
+river thresholds, and verified flood-risk labels.
+
+**Acceptance gate:** an admin can select a state, see labeled monthly data and
+current risk, print the report, and distinguish missing coverage from zero rain.
+
+### Sprint 3 — Cyclone trust and official guidance
+
+**Status: cyclone source hardening complete; operational reconciliation incomplete.**
+
+Completed:
+
+- No embedded cyclone records.
+- No fabricated tracks, radii, wind, pressure, or landfall values.
+- Expired and unrelated events are suppressed.
+- Current/forming GDACS events are the only cyclone markers.
+
+Still required:
+
+1. Add IMD/RSMC official advisories as a second authoritative source.
+2. Store provider event ID, source URL, issued time, valid-until time, and
+   freshness status.
+3. Reconcile conflicting GDACS and IMD events before public display.
+4. Add a visible “source and last updated” badge.
+5. Add automated tests proving expired, unavailable, malformed, and non-India
+   events never render.
+6. Keep cyclone detection separate from rainfall and flood-risk prediction.
+
+**Acceptance gate:** no cyclone marker appears unless a current trusted event is
+available; stale or conflicting data is marked unavailable for review.
+
+### Sprint 4 — RAG and rescue operations
+
+**Status: foundation implemented; production workflow incomplete.**
+
+Implemented:
+
+- Government-domain document upload.
+- PDF/text extraction and chunking.
+- Duplicate checksum protection.
+- Admin approval state.
+- Grounded retrieval boundary and refusal behavior.
+- Rescue-center CRUD, capacity, status, and audit events.
+
+Still required:
+
+1. Add malware scanning and durable object storage.
+2. Add document versioning, expiry reminders, retraction, and reviewer identity.
+3. Display citations and document freshness in every grounded answer.
+4. Add responder assignment, incident queues, shelter routing, evacuation zones,
+   and immutable operational audit history.
+5. Add multilingual and accessibility review for emergency guidance.
+
+**Acceptance gate:** unapproved, expired, unsupported, or unavailable guidance
+cannot be presented as official advice.
+
+### Sprint 5 — Deployment and operational readiness
+
+**Status: not ready for production deployment.**
+
+Required before hosting:
+
+1. Run `npm run lint`, `npm run build`, backend `npm test`, Python checks, and
+   `python scripts\smoke_local.py` with all services active.
+2. Add Playwright/Cypress tests for authentication, map telemetry, cyclone
+   suppression, admin scroll/navigation, charts, RAG upload/approval, and
+   notification flows.
+3. Provision MongoDB Atlas with backups, indexes, encryption, restore testing,
+   and a retention policy.
+4. Deploy Express and FastAPI behind HTTPS with health/readiness checks,
+   timeout/retry policy, structured logs, metrics, and alerting.
+5. Configure `CORS_ORIGINS` to the production frontend only and set
+   `ALLOW_ADMIN_REGISTRATION=false`.
+6. Store secrets in a cloud secret manager; never put production values in git
+   or frontend bundles.
+7. Add rate limiting, request-size limits, dependency scanning, security headers,
+   upload malware scanning, and a rollback plan.
+8. Configure SMS/push/email delivery with retries, deduplication, escalation,
+   provider failover, and delivery audit records.
+9. Run tabletop drills for cyclone, flood, stale provider, provider outage,
+   database outage, false-positive review, and emergency notification failure.
+10. Obtain disaster-management stakeholder sign-off before public alerts.
+
+**Deployment gate:** the application may be hosted for private team testing
+after the technical checks pass, but it must not claim operational emergency
+prediction until verified labels, official-source reconciliation, human review,
+notification testing, and incident drills are complete.
+
+## 10. Required decisions and inputs from the project owner
+
+To complete the MVP without guessing, provide or approve:
+
+1. **State coverage:** keep the existing 22 hubs, or approve expansion to
+   2–3 monitored hubs per target state.
+2. **Report export:** print-to-PDF only, or print plus CSV/JSON download.
+3. **Authoritative cyclone source:** approval to add IMD/RSMC alongside GDACS.
+4. **Flood labels:** verified gauge/flood records, affected-area polygons, or
+   permission to keep the result explicitly proxy-only.
+5. **Alert policy:** who approves public alerts, severity thresholds, escalation
+   contacts, and whether alerts are advisory or operational.
+6. **Cloud choices:** hosting provider, MongoDB Atlas project, domain, regions,
+   secret manager, email/SMS/push providers, and budget limits.
+7. **Privacy policy:** location retention, report-image retention, consent,
+   deletion, and responder access rules.
+
+Until these inputs are supplied, the safe defaults are: existing hubs only,
+print plus CSV/JSON, GDACS plus IMD/RSMC reconciliation, proxy scores labeled
+non-operational, human approval for every public alert, and private cloud
+staging rather than public emergency deployment.

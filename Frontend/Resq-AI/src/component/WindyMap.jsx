@@ -66,7 +66,7 @@ export default function WindyMap({ onSwitchToMap }) {
       const res = await fetch(`${API_URL}/weather/storms`)
       if (res.ok) {
         const data = await res.json()
-        const tracks = data.tracks || []
+        const tracks = data.live === true && Array.isArray(data.tracks) ? data.tracks : []
         setStorms(tracks)
         postToIframe({
           type: 'update-cyclones',

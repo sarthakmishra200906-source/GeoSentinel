@@ -5,13 +5,34 @@ import sharp from 'sharp'
 import Report from '../models/Report.js'
 import { optionalAuth } from '../middleware/optionalAuth.js'
 import { helpImageUpload, uploadDirectory } from '../middleware/upload.js'
+import { requireAdmin } from '../middleware/admin.js'
 
 const router = Router()
 
-router.get('/', async (request, response, next) => {
+router.get('/', ...requireAdmin, async (request, response, next) => {
   try {
     const reports = await Report.find().sort({ createdAt: -1 }).lean()
     response.json(reports)
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/:id/image', ...requireAdmin, async (request, response, next) => {
+  try {
+    const report = await Report.findById(request.params.id).select('imageUrl')
+    if (!report?.imageUrl) {
+      response.status(404).json({ error: 'Report image not found' })
+      return
+    }
+    const filename = path.basename(report.imageUrl)
+    if (!filename || filename === '.' || filename === '..') {
+      response.status(404).json({ error: 'Report image not found' })
+      return
+    }
+    response.sendFile(path.join(uploadDirectory, filename), (error) => {
+      if (error && !response.headersSent) next(error)
+    })
   } catch (error) {
     next(error)
   }

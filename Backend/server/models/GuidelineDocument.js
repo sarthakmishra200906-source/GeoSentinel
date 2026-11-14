@@ -14,6 +14,8 @@ const guidelineDocumentSchema = new mongoose.Schema(
     status: { type: String, enum: ['pending', 'approved', 'rejected', 'inactive'], default: 'pending' },
     fileName: { type: String, required: true, trim: true },
     mimeType: { type: String, required: true, trim: true },
+    extractionStatus: { type: String, enum: ['readable', 'rejected'], default: 'readable', index: true },
+    extractionMethod: { type: String, enum: ['text', 'ocr'], default: 'text' },
     rawText: { type: String, required: true },
     chunks: [
       {

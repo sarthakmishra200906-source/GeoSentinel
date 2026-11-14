@@ -1,33 +1,37 @@
 import { Router } from 'express'
+import { assessTelemetry } from '../services/riskAssessment.js'
 
 const router = Router()
 const hubs = [
-  { name: 'Srinagar', latitude: 34.0837, longitude: 74.7973 },
-  { name: 'Leh', latitude: 34.1526, longitude: 77.5771 },
-  { name: 'Delhi', latitude: 28.6139, longitude: 77.209 },
-  { name: 'Jaipur', latitude: 26.9124, longitude: 75.7873 },
-  { name: 'Lucknow', latitude: 26.8467, longitude: 80.9462 },
-  { name: 'Patna', latitude: 25.5941, longitude: 85.1376 },
-  { name: 'Ahmedabad', latitude: 23.0225, longitude: 72.5714 },
-  { name: 'Bhopal', latitude: 23.2599, longitude: 77.4126 },
-  { name: 'Kolkata', latitude: 22.5726, longitude: 88.3639 },
-  { name: 'Ranchi', latitude: 23.3441, longitude: 85.3096 },
-  { name: 'Mumbai', latitude: 19.076, longitude: 72.8777 },
-  { name: 'Pune', latitude: 18.5204, longitude: 73.8567 },
-  { name: 'Hyderabad', latitude: 17.385, longitude: 78.4867 },
-  { name: 'Bhubaneswar', latitude: 20.2961, longitude: 85.8245 },
-  { name: 'Paradip', latitude: 20.3167, longitude: 86.6167 },
-  { name: 'Gopalpur', latitude: 19.2667, longitude: 84.9 },
-  { name: 'Goa', latitude: 15.4909, longitude: 73.8278 },
-  { name: 'Bengaluru', latitude: 12.9716, longitude: 77.5946 },
-  { name: 'Chennai', latitude: 13.0827, longitude: 80.2707 },
-  { name: 'Kochi', latitude: 9.9312, longitude: 76.2673 },
-  { name: 'Visakhapatnam', latitude: 17.6868, longitude: 83.2185 },
-  { name: 'Guwahati', latitude: 26.1445, longitude: 91.7362 },
+  { name: 'Srinagar', state: 'Jammu and Kashmir', latitude: 34.0837, longitude: 74.7973 },
+  { name: 'Leh', state: 'Ladakh', latitude: 34.1526, longitude: 77.5771 },
+  { name: 'Delhi', state: 'Delhi', latitude: 28.6139, longitude: 77.209 },
+  { name: 'Jaipur', state: 'Rajasthan', latitude: 26.9124, longitude: 75.7873 },
+  { name: 'Lucknow', state: 'Uttar Pradesh', latitude: 26.8467, longitude: 80.9462 },
+  { name: 'Patna', state: 'Bihar', latitude: 25.5941, longitude: 85.1376 },
+  { name: 'Ahmedabad', state: 'Gujarat', latitude: 23.0225, longitude: 72.5714 },
+  { name: 'Bhopal', state: 'Madhya Pradesh', latitude: 23.2599, longitude: 77.4126 },
+  { name: 'Kolkata', state: 'West Bengal', latitude: 22.5726, longitude: 88.3639 },
+  { name: 'Ranchi', state: 'Jharkhand', latitude: 23.3441, longitude: 85.3096 },
+  { name: 'Mumbai', state: 'Maharashtra', latitude: 19.076, longitude: 72.8777 },
+  { name: 'Pune', state: 'Maharashtra', latitude: 18.5204, longitude: 73.8567 },
+  { name: 'Hyderabad', state: 'Telangana', latitude: 17.385, longitude: 78.4867 },
+  { name: 'Bhubaneswar', state: 'Odisha', latitude: 20.2961, longitude: 85.8245 },
+  { name: 'Paradip', state: 'Odisha', latitude: 20.3167, longitude: 86.6167 },
+  { name: 'Gopalpur', state: 'Odisha', latitude: 19.2667, longitude: 84.9 },
+  { name: 'Goa', state: 'Goa', latitude: 15.4909, longitude: 73.8278 },
+  { name: 'Bengaluru', state: 'Karnataka', latitude: 12.9716, longitude: 77.5946 },
+  { name: 'Chennai', state: 'Tamil Nadu', latitude: 13.0827, longitude: 80.2707 },
+  { name: 'Kochi', state: 'Kerala', latitude: 9.9312, longitude: 76.2673 },
+  { name: 'Visakhapatnam', state: 'Andhra Pradesh', latitude: 17.6868, longitude: 83.2185 },
+  { name: 'Guwahati', state: 'Assam', latitude: 26.1445, longitude: 91.7362 },
 ]
 const supportedTileLayers = new Set(['temp_new', 'precipitation_new', 'wind_new', 'clouds_new'])
 let cachedPoints = null
 let cachedAt = 0
+let cachedDashboard = null
+let cachedDashboardAt = 0
+let dashboardInFlight = null
 
 function validateCoordinates(request, response) {
   const latitude = Number(request.query.lat)
@@ -308,129 +312,295 @@ router.get('/forecast', async (request, response, next) => {
   }
 })
 
-const ACTIVE_WORLD_CYCLONES = [
-  {
-    id: 'cyclone-bay-of-bengal',
-    name: '🌀 Cyclonic Storm FENGAL',
-    category: 'Severe Cyclonic Storm',
-    maxWindKmh: 115,
-    pressureHpa: 984,
-    status: 'ACTIVE_WARNING',
-    basin: 'Bay of Bengal / North Indian Ocean',
-    coordinates: [
-      [13.2, 82.8],
-      [12.8, 84.5],
-      [12.1, 86.4],
-      [11.2, 88.9],
-      [10.1, 91.2],
-    ],
-    radiiKm: { warning: 160, danger: 80 },
-    landfallRisk: ['Tamil Nadu Coast', 'Puducherry', 'South Andhra Pradesh'],
-  },
-  {
-    id: 'cyclone-arabian-sea',
-    name: '🌀 Deep Depression ASNA',
-    category: 'Cyclonic Storm',
-    maxWindKmh: 85,
-    pressureHpa: 992,
-    status: 'ACTIVE_WARNING',
-    basin: 'Arabian Sea',
-    coordinates: [
-      [20.4, 66.8],
-      [21.2, 67.9],
-      [22.1, 68.8],
-      [22.8, 69.6],
-    ],
-    radiiKm: { warning: 120, danger: 60 },
-    landfallRisk: ['Gujarat Coast (Kutch/Saurashtra)', 'Sindh Coast'],
-  },
-  {
-    id: 'typhoon-west-pacific',
-    name: '🌀 Super Typhoon MAN-YI',
-    category: 'Category 4 Super Typhoon',
-    maxWindKmh: 215,
-    pressureHpa: 925,
-    status: 'ACTIVE_WARNING',
-    basin: 'Western Pacific Ocean',
-    coordinates: [
-      [16.2, 121.5],
-      [15.4, 124.6],
-      [14.2, 128.2],
-      [12.9, 132.8],
-    ],
-    radiiKm: { warning: 260, danger: 130 },
-    landfallRisk: ['Luzon', 'Eastern Visayas', 'South China Sea'],
-  },
-  {
-    id: 'typhoon-philippine-sea',
-    name: '🌀 Typhoon USAGI',
-    category: 'Category 3 Typhoon',
-    maxWindKmh: 175,
-    pressureHpa: 955,
-    status: 'ACTIVE_WARNING',
-    basin: 'Philippine Sea / Luzon Strait',
-    coordinates: [
-      [19.8, 121.1],
-      [18.7, 122.9],
-      [17.3, 125.4],
-      [15.8, 128.0],
-    ],
-    radiiKm: { warning: 180, danger: 90 },
-    landfallRisk: ['Batanes', 'Northern Luzon', 'Taiwan Strait'],
-  },
-  {
-    id: 'cyclone-south-indian-ocean',
-    name: '🌀 Tropical Cyclone BHEKI',
-    category: 'Severe Tropical Cyclone',
-    maxWindKmh: 130,
-    pressureHpa: 978,
-    status: 'ACTIVE_WARNING',
-    basin: 'South-West Indian Ocean',
-    coordinates: [
-      [-18.8, 61.5],
-      [-17.6, 64.8],
-      [-16.2, 68.2],
-      [-14.9, 72.1],
-    ],
-    radiiKm: { warning: 160, danger: 80 },
-    landfallRisk: ['Mauritius', 'Rodrigues Island', 'Reunion Island'],
-  },
-  {
-    id: 'storm-caribbean-sara',
-    name: '🌀 Tropical Storm SARA',
-    category: 'Tropical Storm',
-    maxWindKmh: 85,
-    pressureHpa: 997,
-    status: 'ACTIVE_WARNING',
-    basin: 'Caribbean Sea / Gulf of Honduras',
-    coordinates: [
-      [16.1, -86.5],
-      [16.0, -85.1],
-      [15.8, -83.5],
-      [15.4, -81.8],
-    ],
-    radiiKm: { warning: 140, danger: 70 },
-    landfallRisk: ['Northern Honduras', 'Belize', 'Yucatan Peninsula'],
-  },
-  {
-    id: 'cyclone-south-pacific',
-    name: '🌀 Tropical Cyclone ALICIA',
-    category: 'Category 2 Cyclone',
-    maxWindKmh: 100,
-    pressureHpa: 988,
-    status: 'ACTIVE_WARNING',
-    basin: 'South Pacific Ocean / Coral Sea',
-    coordinates: [
-      [-15.2, 168.4],
-      [-16.1, 170.2],
-      [-17.3, 172.5],
-    ],
-    radiiKm: { warning: 150, danger: 75 },
-    landfallRisk: ['Vanuatu', 'Fiji Sea'],
-  },
-]
+router.get('/dashboard', async (_request, response, next) => {
+  if (cachedDashboard && Date.now() - cachedDashboardAt < 5 * 60 * 1000) {
+    response.json({ ...cachedDashboard, cached: true })
+    return
+  }
+  if (dashboardInFlight) {
+    try {
+      response.json({ ...(await dashboardInFlight), cached: true })
+    } catch (error) {
+      next(error)
+    }
+    return
+  }
+  dashboardInFlight = (async () => {
+    const locations = [{ name: 'India', latitude: 20.5937, longitude: 78.9629 }, ...hubs]
+    const url = new URL('https://api.open-meteo.com/v1/forecast')
+    url.searchParams.set('latitude', locations.map((location) => location.latitude).join(','))
+    url.searchParams.set('longitude', locations.map((location) => location.longitude).join(','))
+    url.searchParams.set(
+      'current',
+      'temperature_2m,relative_humidity_2m,precipitation,rain,weather_code,wind_speed_10m,surface_pressure',
+    )
+    url.searchParams.set('hourly', 'precipitation_probability,precipitation,temperature_2m')
+    url.searchParams.set('forecast_days', '1')
+    url.searchParams.set('timezone', 'auto')
+    const weatherResponse = await fetch(url)
+    if (!weatherResponse.ok) {
+      throw new Error(`Forecast provider returned HTTP ${weatherResponse.status}`)
+    }
+    const payload = await weatherResponse.json()
+    const weatherPayloads = Array.isArray(payload) ? payload : [payload]
+    const floodResults = await Promise.allSettled(
+      locations.map(async (location) => {
+        const floodUrl = new URL('https://flood-api.open-meteo.com/v1/flood')
+        floodUrl.searchParams.set('latitude', location.latitude)
+        floodUrl.searchParams.set('longitude', location.longitude)
+        floodUrl.searchParams.set('daily', 'river_discharge,river_discharge_max')
+        floodUrl.searchParams.set('forecast_days', '1')
+        const floodResponse = await fetch(floodUrl)
+        return floodResponse.ok ? floodResponse.json() : null
+      }),
+    )
+    const floodPayloads = floodResults.map((result) => (result.status === 'fulfilled' ? result.value : null))
+    const readings = weatherPayloads.map((data, index) => {
+      const current = data.current || {}
+      const hourly = data.hourly || {}
+      const probabilities = (hourly.precipitation_probability || []).map(Number).filter(Number.isFinite)
+      const precipitation = (hourly.precipitation || []).map(Number).filter(Number.isFinite)
+      const temperatures = (hourly.temperature_2m || []).map(Number).filter(Number.isFinite)
+      const discharge = Number(floodPayloads[index]?.daily?.river_discharge?.[0] || 0)
+      const rainAmountMm = precipitation.reduce((total, value) => total + value, 0)
+      const assessment = assessTelemetry({
+        precipitationSum: Number(current.rain ?? current.precipitation ?? 0),
+        rain72h: rainAmountMm,
+        rainChance: probabilities.length ? Math.max(...probabilities) : 0,
+        riverDischarge: discharge,
+        pressure: Number(current.surface_pressure ?? 1013),
+        windSpeed: Number(current.wind_speed_10m ?? 0),
+      })
+      return {
+        ...locations[index],
+        temperature: Number(current.temperature_2m),
+        humidity: Number(current.relative_humidity_2m),
+        currentRainMm: Number(current.rain ?? current.precipitation ?? 0),
+        rainChance: probabilities.length ? Math.max(...probabilities) : 0,
+        rainAmountMm,
+        riverDischarge: discharge,
+        rainOutlook: assessment.rainOutlook,
+        rainOutlookTier: assessment.rainOutlookTier,
+        activeFloodRisk: assessment.activeFloodRisk,
+        activeFloodRiskTier: assessment.activeFloodRiskTier,
+        floodRisk: assessment.activeFloodRisk,
+        floodRiskTier: assessment.activeFloodRiskTier,
+        riskStatus: assessment.status,
+        riskFactors: assessment.factors,
+        riskWarnings: assessment.warnings,
+        maxTemperature: temperatures.length ? Math.max(...temperatures) : Number(current.temperature_2m),
+        windSpeed: Number(current.wind_speed_10m),
+        pressure: Number(current.surface_pressure),
+        condition: weatherCodeToCondition(current.weather_code),
+        observedAt: current.time || new Date().toISOString(),
+      }
+    })
+    return {
+      provider: 'Open-Meteo forecast',
+      generatedAt: new Date().toISOString(),
+      india: readings[0],
+      cities: readings.slice(1),
+    }
+  })()
+  try {
+    const result = await dashboardInFlight
+    cachedDashboard = result
+    cachedDashboardAt = Date.now()
+    response.json(result)
+  } catch (error) {
+    response.status(503).json({ error: error.message })
+  } finally {
+    dashboardInFlight = null
+  }
+})
 
-let cycloneSimulationActive = false
+router.get('/states', async (_request, response, next) => {
+  try {
+    const url = new URL('https://api.open-meteo.com/v1/forecast')
+    url.searchParams.set('latitude', hubs.map((hub) => hub.latitude).join(','))
+    url.searchParams.set('longitude', hubs.map((hub) => hub.longitude).join(','))
+    url.searchParams.set('current', 'temperature_2m,precipitation,rain,wind_speed_10m,surface_pressure')
+    url.searchParams.set('daily', 'precipitation_sum,temperature_2m_max')
+    url.searchParams.set('forecast_days', '1')
+    url.searchParams.set('timezone', 'UTC')
+    const providerResponse = await fetch(url)
+    if (!providerResponse.ok) {
+      response.status(503).json({ error: `Forecast provider returned HTTP ${providerResponse.status}` })
+      return
+    }
+    const payload = await providerResponse.json()
+    const floodPayloads = await Promise.all(
+      hubs.map(async (hub) => {
+        const floodUrl = new URL('https://flood-api.open-meteo.com/v1/flood')
+        floodUrl.searchParams.set('latitude', hub.latitude)
+        floodUrl.searchParams.set('longitude', hub.longitude)
+        floodUrl.searchParams.set('daily', 'river_discharge')
+        floodUrl.searchParams.set('forecast_days', '1')
+        const floodResponse = await fetch(floodUrl)
+        return floodResponse.ok ? floodResponse.json() : null
+      }),
+    )
+    const readings = (Array.isArray(payload) ? payload : [payload]).map((data, index) => {
+      const current = data.current || {}
+      const daily = data.daily || {}
+      const riverDischarge = Number(floodPayloads[index]?.daily?.river_discharge?.[0])
+      const assessment = assessTelemetry({
+        precipitationSum: Number(current.rain ?? current.precipitation),
+        rain72h: Number(current.rain ?? current.precipitation),
+        riverDischarge,
+        pressure: Number(current.surface_pressure),
+        windSpeed: Number(current.wind_speed_10m),
+      })
+      return {
+        ...hubs[index],
+        rainfallMm: Number(daily.precipitation_sum?.[0] ?? current.precipitation ?? 0),
+        temperature: Number(daily.temperature_2m_max?.[0] ?? current.temperature_2m),
+        riverDischarge: Number.isFinite(riverDischarge) ? riverDischarge : null,
+        activeFloodRisk: assessment.activeFloodRisk,
+        activeFloodRiskTier: assessment.activeFloodRiskTier,
+        riskStatus: assessment.status,
+        observedAt: current.time || new Date().toISOString(),
+      }
+    })
+    const grouped = new Map()
+    for (const reading of readings) {
+      const current = grouped.get(reading.state) || {
+        state: reading.state,
+        monitoredCities: 0,
+        rainfallMm: 0,
+        maxTemperature: null,
+        activeAlertCount: 0,
+        coverageStatus: 'LIVE',
+        cities: [],
+      }
+      current.monitoredCities += 1
+      current.rainfallMm += reading.rainfallMm
+      current.maxTemperature = Math.max(current.maxTemperature ?? -Infinity, reading.temperature)
+      if (['HIGH', 'CRITICAL'].includes(reading.activeFloodRiskTier)) current.activeAlertCount += 1
+      current.riskValues = current.riskValues || []
+      if (reading.activeFloodRisk !== null) current.riskValues.push(reading.activeFloodRisk)
+      current.cities.push(reading.name)
+      grouped.set(reading.state, current)
+    }
+    response.json({
+      provider: 'Open-Meteo forecast',
+      generatedAt: new Date().toISOString(),
+      warning: 'Risk is proxy-calibrated and must not be used as an official emergency warning.',
+      states: [...grouped.values()].map((state) => ({
+        ...state,
+        rainfallMm: Math.round(state.rainfallMm * 10) / 10,
+        maxTemperature: Math.round(state.maxTemperature * 10) / 10,
+        averageActiveFloodRisk: state.riskValues?.length
+          ? Math.round((state.riskValues.reduce((total, value) => total + value, 0) / state.riskValues.length) * 100) / 100
+          : null,
+      })),
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/trends', async (request, response, next) => {
+  try {
+    const state = String(request.query.state || '').trim()
+    const selected = hubs.filter((hub) => !state || hub.state.toLowerCase() === state.toLowerCase())
+    if (!selected.length) {
+      response.status(400).json({ error: 'state must match a monitored state' })
+      return
+    }
+    const end = new Date()
+    const start = new Date(end)
+    start.setUTCDate(start.getUTCDate() - 365)
+    const url = new URL('https://archive-api.open-meteo.com/v1/archive')
+    url.searchParams.set('latitude', selected[0].latitude)
+    url.searchParams.set('longitude', selected[0].longitude)
+    url.searchParams.set('start_date', start.toISOString().slice(0, 10))
+    url.searchParams.set('end_date', end.toISOString().slice(0, 10))
+    url.searchParams.set('daily', 'precipitation_sum,temperature_2m_mean,temperature_2m_max')
+    url.searchParams.set('timezone', 'UTC')
+    const floodUrl = new URL('https://flood-api.open-meteo.com/v1/flood')
+    floodUrl.searchParams.set('latitude', selected[0].latitude)
+    floodUrl.searchParams.set('longitude', selected[0].longitude)
+    floodUrl.searchParams.set('start_date', start.toISOString().slice(0, 10))
+    floodUrl.searchParams.set('end_date', end.toISOString().slice(0, 10))
+    floodUrl.searchParams.set('daily', 'river_discharge')
+    floodUrl.searchParams.set('timezone', 'UTC')
+    const [providerResponse, floodResponse] = await Promise.all([fetch(url), fetch(floodUrl)])
+    if (!providerResponse.ok) {
+      response.status(503).json({ error: `Historical provider returned HTTP ${providerResponse.status}` })
+      return
+    }
+    const payload = await providerResponse.json()
+    const floodPayload = floodResponse.ok ? await floodResponse.json() : {}
+    const daily = payload.daily || {}
+    const months = new Map()
+    ;(daily.time || []).forEach((date, index) => {
+      const month = String(date).slice(0, 7)
+      const item = months.get(month) || {
+        month,
+        rainfallMm: 0,
+        temperatureSum: 0,
+        maxTemperature: -Infinity,
+        riverDischargeSum: 0,
+        riverDays: 0,
+        days: 0,
+      }
+      item.rainfallMm += Number(daily.precipitation_sum?.[index] || 0)
+      item.temperatureSum += Number(daily.temperature_2m_mean?.[index] || 0)
+      item.maxTemperature = Math.max(item.maxTemperature, Number(daily.temperature_2m_max?.[index] || 0))
+      const river = Number(floodPayload.daily?.river_discharge?.[index])
+      if (Number.isFinite(river)) {
+        item.riverDischargeSum += river
+        item.riverDays += 1
+      }
+      item.days += 1
+      months.set(month, item)
+    })
+    response.json({
+      state: selected[0].state,
+      city: selected[0].name,
+      provider: 'Open-Meteo Historical Weather',
+      generatedAt: new Date().toISOString(),
+      coverageStatus: 'PARTIAL',
+      warning: 'Flood-risk labels remain unavailable until verified flood-event observations are supplied.',
+      months: [...months.values()].map((item) => ({
+        month: item.month,
+        rainfallMm: Math.round(item.rainfallMm * 10) / 10,
+        meanTemperature: item.days ? Math.round((item.temperatureSum / item.days) * 10) / 10 : null,
+        maxTemperature: Math.round(item.maxTemperature * 10) / 10,
+        averageRiverDischarge: item.riverDays ? Math.round((item.riverDischargeSum / item.riverDays) * 10) / 10 : null,
+        floodRisk: null,
+      })),
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+const INDIA_CYCLONE_BOUNDS = { minLat: -5, maxLat: 35, minLon: 55, maxLon: 105 }
+
+const isCurrentIndiaRegionEvent = (feature, now = Date.now()) => {
+  const props = feature.properties || {}
+  const startsAt = Date.parse(props.fromdate || props.fromDate || '')
+  const endsAt = Date.parse(props.todate || props.toDate || '')
+  if (!Number.isFinite(startsAt) || !Number.isFinite(endsAt) || endsAt < now || startsAt > now + 7 * 24 * 60 * 60 * 1000) {
+    return false
+  }
+  const coords = feature.geometry?.coordinates
+  const latitude = Number(coords?.[1])
+  const longitude = Number(coords?.[0])
+  const country = String(props.country || '').toLowerCase()
+  return (
+    country.includes('india') ||
+    (Number.isFinite(latitude) &&
+      Number.isFinite(longitude) &&
+      latitude >= INDIA_CYCLONE_BOUNDS.minLat &&
+      latitude <= INDIA_CYCLONE_BOUNDS.maxLat &&
+      longitude >= INDIA_CYCLONE_BOUNDS.minLon &&
+      longitude <= INDIA_CYCLONE_BOUNDS.maxLon)
+  )
+}
+
 let cachedGdacsTracks = null
 let lastGdacsFetch = 0
 
@@ -452,32 +622,31 @@ async function fetchLiveGlobalCyclones() {
       const data = await res.json()
       const features = data?.features || []
       if (features.length > 0) {
-        const liveTracks = features.slice(0, 10).map((f, idx) => {
+        const liveTracks = features
+          .filter((feature) => isCurrentIndiaRegionEvent(feature))
+          .slice(0, 10)
+          .map((f, idx) => {
           const props = f.properties || {}
-          const geom = f.geometry || {}
-          const coords = geom.coordinates || [0, 0]
-          const lat = coords[1]
-          const lon = coords[0]
+          const coords = f.geometry?.coordinates
+          const point = Array.isArray(coords) && typeof coords[0] === 'number' ? [Number(coords[1]), Number(coords[0])] : null
+          if (!point || !Number.isFinite(point[0]) || !Number.isFinite(point[1])) return null
           const name = props.name || props.eventname || `Tropical Cyclone ${idx + 1}`
-          const wind = Number(props.severitydata?.severity || 90)
+          const wind = Number(props.severitydata?.severity)
 
           return {
             id: `gdacs-tc-${props.eventid || idx}`,
             name: name.startsWith('🌀') ? name : `🌀 ${name}`,
             category: props.alertlevel ? `${props.alertlevel} Alert Cyclone` : 'Tropical Cyclone',
-            maxWindKmh: Math.round(wind),
-            pressureHpa: 985,
+            ...(Number.isFinite(wind) ? { maxWindKmh: Math.round(wind) } : {}),
             status: 'ACTIVE_LIVE_GDACS',
             basin: props.country || 'Global Oceans',
-            coordinates: [
-              [lat, lon],
-              [lat - 0.8, lon + 1.6],
-              [lat - 1.5, lon + 3.2],
-            ],
-            radiiKm: { warning: 150, danger: 75 },
-            landfallRisk: [props.country || 'Coastal waters'],
+            coordinates: [point],
+            source: 'GDACS',
+            validFrom: props.fromdate || null,
+            validUntil: props.todate || null,
           }
-        })
+          })
+          .filter(Boolean)
 
         if (liveTracks.length > 0) {
           cachedGdacsTracks = liveTracks
@@ -487,42 +656,25 @@ async function fetchLiveGlobalCyclones() {
       }
     }
   } catch {
-    // GDACS unavailable or network timeout; fallback to active tracked world cyclones
+    // Do not substitute stale or simulated tracks for unavailable live data.
   }
 
-  cachedGdacsTracks = ACTIVE_WORLD_CYCLONES
+  cachedGdacsTracks = []
   lastGdacsFetch = Date.now()
-  return ACTIVE_WORLD_CYCLONES
+  return []
 }
 
-router.get('/storms', async (request, response) => {
+router.get('/storms', async (_request, response) => {
   try {
-    const envTracks = process.env.WEATHER_STORM_TRACKS_JSON
-      ? JSON.parse(process.env.WEATHER_STORM_TRACKS_JSON)
-      : []
-
-    const isSimulate = request.query.simulate === 'true' && cycloneSimulationActive
     const liveTracks = await fetchLiveGlobalCyclones()
-
-    // Combine any configured env tracks with live global tracked cyclones
-    const tracks = isSimulate
-      ? [...envTracks, ...liveTracks]
-      : (envTracks.length > 0 ? envTracks : liveTracks)
-
-    response.json({ tracks, count: tracks.length, simulated: isSimulate })
+    response.json({ tracks: liveTracks, count: liveTracks.length, live: true })
   } catch (error) {
     response.status(500).json({ error: error.message || 'Error loading storm tracks' })
   }
 })
 
-router.post('/storms/simulate', (request, response) => {
-  const { active } = request.body || {}
-  cycloneSimulationActive = active !== undefined ? Boolean(active) : !cycloneSimulationActive
-  response.json({
-    status: 'ok',
-    simulated: cycloneSimulationActive,
-    tracks: cycloneSimulationActive ? ARABIAN_SEA_CYCLONE_SIMULATION : [],
-  })
+router.post('/storms/simulate', (_request, response) => {
+  response.status(410).json({ error: 'Cyclone simulation has been removed; only live provider data is shown.' })
 })
 
 export default router
