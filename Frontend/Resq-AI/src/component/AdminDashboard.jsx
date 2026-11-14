@@ -29,7 +29,6 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
   const [stateReport, setStateReport] = useState(null)
   const [trendReport, setTrendReport] = useState(null)
   const [selectedState, setSelectedState] = useState('')
-  const [simulation, setSimulation] = useState(null)
   const [notificationForm, setNotificationForm] = useState({
     title: '',
     message: '',
@@ -92,17 +91,6 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
       })
       .catch((error) => setMessage(error.message))
   }, [selectedState, stateReport])
-
-  const runSimulation = async () => {
-    const response = await fetch(`${API_URL}/prediction/simulate`, {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    })
-    const data = await response.json()
-    if (!response.ok) throw new Error(data.error || 'Unable to run simulation')
-    setSimulation(data)
-  }
 
   const sendNotification = async (event) => {
     event.preventDefault()
@@ -514,15 +502,24 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
         {trendReport?.warning && <p className="form-warning">{trendReport.warning}</p>}
       </section>
 
-      <h3>ML Flood Simulation</h3>
-      <button type="button" onClick={() => runSimulation().catch((error) => setMessage(error.message))}>
-        Run Heavy-Rain Inference Simulation
-      </button>
-      {simulation && (
-        <p role="status">
-          SIMULATED · {simulation.riskTier || simulation.risk_tier} · probability {simulation.probability} · no public alert created
-        </p>
-      )}
+      <section className="model-status-card" aria-labelledby="model-status-title">
+        <div>
+          <span className="eyebrow">Decision support boundary</span>
+          <h3 id="model-status-title">Flood-risk model status</h3>
+          <p>
+            Live flood risk uses current telemetry and remains a proxy signal
+            until verified flood observations are available. Use the dedicated
+            Odisha simulator for controlled cyclone and heavy-rain rehearsals.
+          </p>
+        </div>
+        <div className="model-status-meta">
+          <strong>{health?.ml === 'online' ? 'ML service online' : 'ML service status unavailable'}</strong>
+          <span>Live alerts are never created by model diagnostics.</span>
+          <button type="button" onClick={() => document.getElementById('admin-simulation')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+            Open simulation workspace
+          </button>
+        </div>
+      </section>
 
       <h3>Broadcast Emergency Notification</h3>
       <form

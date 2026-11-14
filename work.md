@@ -56,6 +56,16 @@ Current ready-to-test boundary: an admin can create an Odisha scenario, create
  switching, reports/object storage, resource locking, historical calibration,
  and production cloud scale testing remain intentionally incomplete.
 
+### Admin dashboard UX update
+
+The legacy one-click “ML Flood Simulation / Run Heavy-Rain Inference
+Simulation” control was removed from the dashboard because it duplicated and
+confused the scenario simulator. It was a diagnostic proxy inference, not a
+cyclone rehearsal. The dashboard now presents a clearly labeled flood-risk
+model status card and links to the dedicated Odisha simulation workspace.
+Existing charts, document upload/RAG management, rescue-center operations,
+notifications, and audit log remain available through the section navigator.
+
 ### Already present
 
 - React/Vite frontend with an India-centered Leaflet weather map.

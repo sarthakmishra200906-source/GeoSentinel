@@ -1671,6 +1671,64 @@ body,
   font-size: 0.85rem;
 }
 
+.model-status-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.45fr);
+  gap: 20px;
+  align-items: center;
+  margin: 20px 0;
+  padding: 22px;
+  border: 1px solid #c7d2fe;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #eef2ff, #f8fafc);
+}
+
+.model-status-card h3 {
+  margin: 5px 0 8px;
+  color: #172554;
+}
+
+.model-status-card p {
+  max-width: 720px;
+  margin: 0;
+  color: #475569;
+  line-height: 1.55;
+}
+
+.eyebrow {
+  color: #4f46e5;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.model-status-meta {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 12px;
+  background: #fff;
+  color: #334155;
+  box-shadow: 0 8px 20px rgba(30, 41, 59, 0.07);
+}
+
+.model-status-meta span {
+  color: #64748b;
+  font-size: 0.82rem;
+}
+
+.model-status-meta button {
+  width: fit-content;
+  border: 0;
+  border-radius: 8px;
+  padding: 9px 12px;
+  background: #0f766e;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
+}
+
 .weather-report-summary {
   justify-content: flex-start;
   margin: 18px 0;
@@ -1747,6 +1805,10 @@ body,
 }
 
 @media (max-width: 760px) {
+  .model-status-card {
+    grid-template-columns: 1fr;
+  }
+
   .analytics-chart-risk {
     grid-column: span 1;
   }
