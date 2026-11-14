@@ -28,10 +28,12 @@ The foundation phase has started:
 - Added audit events for scenario creation, run creation, and pause actions.
 - Added explicit `simulationMode` response markers.
 
-Not implemented yet: the time-step engine, time-series collection,
-WebSocket/SSE stream, live-vs-simulation context middleware, resource locking,
-reports/object storage, insights, historical calibration, or ML review flow.
-Do not add those surfaces by bypassing the models and audit boundary above.
+Still not implemented: WebSocket/SSE streaming, public live-vs-simulation
+context middleware, resource locking, server-generated PDF/object storage,
+historical calibration, and ML review flow. The time-step engine, persisted
+timestep collection, insights, national synthetic context, browser downloads,
+saved-run history, and admin report reconstruction are implemented. Do not add
+missing surfaces by bypassing the models and audit boundary above.
 
 ### Simulation readiness implementation update
 
@@ -45,16 +47,15 @@ The simulation foundation has now advanced to a runnable local rehearsal:
 - Added a full-screen-ready admin simulation workspace with adjustable
   approach distance, wind, rainfall, duration, institutions, and shelters.
 - Added explicit simulation banner and no-live-alert/no-dispatch messaging.
-- Added admin section navigation for Overview, Simulation, Operations,
-  Guidelines/upload, and Audit log while preserving the existing scrollable
-  dashboard surfaces.
+- Added one global admin sidebar with exclusive Overview, Simulation,
+  Operations, Guidelines/upload, and Audit log views.
 - Added deterministic simulation validation tests.
 
-Current ready-to-test boundary: an admin can create an Odisha scenario, create
- a run, advance synthetic hourly steps, inspect district risk/resource demand,
- and pause the run. WebSocket streaming, live-user simulation context
- switching, reports/object storage, resource locking, historical calibration,
- and production cloud scale testing remain intentionally incomplete.
+Current ready-to-test boundary: an admin can create, save, reload, advance,
+pause, replay, and report an Odisha synthetic run with 30 districts and 36
+synthetic India state summaries. WebSocket streaming, public simulation context
+switching, server PDF/object storage, resource locking, historical calibration,
+and production cloud scale testing remain incomplete.
 
  The simulation route registration bug was fixed after the first browser test:
  step, pause, heartbeat, and run-detail routes had accidentally been declared
@@ -96,6 +97,15 @@ The full 24-hour rehearsal is documented in [test3.md](./test3.md). It adds
 `GET /api/simulation/runs/:id/report` for reconstructing persisted run evidence
 from stored timesteps. These remain synthetic and do not change the live
 operations or 10,000-user rejection boundaries.
+
+### Documentation rule
+
+When behavior changes, update the smallest authoritative document in the same
+change: `work.md` and `README.md` for runtime/route changes, `goal.md` and
+`precaution.md` for safety boundaries, `simulation_test_plan.md`, `test3.md`,
+and `sarthak.md` for simulation behavior, and `help.md` for local checks.
+Historical test reports retain their original evidence; add dated follow-up
+sections instead of rewriting past results.
 
 ### Already present
 

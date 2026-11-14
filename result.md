@@ -83,3 +83,11 @@ The following work remains mandatory:
 
 Local tests cannot prove cloud network, provider-rate-limit, Atlas, or
 10,000-user behavior. Do not host publicly until the staging gates above pass.
+
+## Later simulation evidence
+
+The simulator was extended after this historical OCR/RAG report. Current
+simulation evidence is in [test3.md](./test3.md), and current visibility and
+map behavior are in [sarthak.md](./sarthak.md). Keep this report unchanged for
+its original test scope; do not use its older counts as the latest simulator
+status.

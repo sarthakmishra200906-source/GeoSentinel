@@ -2,10 +2,11 @@
 
 ## Status and approval gate
 
-**Planning only — Revision 2.** This document is a technical design and test
-plan. No simulator code, migration, live-context override, or model-training
-workflow may be implemented until the owner explicitly approves this revised
-plan.
+**Implementation status — Revision 2 baseline.** This document remains the
+authoritative technical design and safety plan. The bounded Odisha simulator
+has been implemented for local admin rehearsal, but the incomplete production
+surfaces listed below must not be added by bypassing its models, provenance,
+authorization, or audit boundary.
 
 The simulator is a controlled rehearsal and decision-support system. It is not
 an official forecast, evacuation order, autonomous dispatch system, or
@@ -17,7 +18,9 @@ The first implementation is a **rule-based district and institutional safety
 decision-support matrix**, not a hydrodynamic flood model. It will focus on
 Odisha districts, schools, hostels, students, shelters, hospitals, roads, and
 response resources. Odisha is the initial test geography; the data model and
-interfaces must remain extensible to other Indian states later.
+interfaces remain extensible to other Indian states later. The current UI also
+shows a clearly labeled synthetic 36-state context summary; that table is not
+the detailed all-India rule engine or live national telemetry.
 
 The MVP will not claim to calculate physically accurate water depth, channel
 flow, inundation boundaries, storm surge, building damage, or road flooding at

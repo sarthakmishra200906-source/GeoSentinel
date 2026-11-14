@@ -106,3 +106,24 @@ Do not treat the result as LOW or SAFE when it is unavailable.
 - Complete model calibration and domain review.
 - Add malware scanning and durable storage for uploads.
 - Configure production secrets, monitoring, backups, load tests, and rollback.
+
+## Admin simulation verification
+
+1. Log in as admin and open `Admin dashboard` -> `Simulation`.
+2. Confirm the `SIMULATION MODE · ODISHA` banner.
+3. Enter custom start/target coordinates and scenario values.
+4. Create a run and advance synthetic hours.
+5. Confirm the map, replay timeline, 30 Odisha district rows, and 36 synthetic
+   state rows.
+6. Confirm the outcome pack shows peak risk, rain, river proxy, temperature,
+   resource advice, user-help status, and AI status.
+7. Download the executive JSON, hourly CSV, and India state CSV.
+8. Select an older run under `Saved cyclone runs` and confirm its evidence
+   reloads.
+9. Click `Map` in the same sidebar. Confirm the simulation disappears and the
+   normal Windy map appears.
+10. Confirm no public notification, SOS, dispatch, or ordinary-user map event
+    was created by the simulation.
+
+See [test3.md](./test3.md) and [sarthak.md](./sarthak.md). This checklist does
+not prove live cyclone operations or 10,000-user readiness.

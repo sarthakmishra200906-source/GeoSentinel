@@ -74,3 +74,14 @@ The system is deployable only when all local checks pass, production secrets and
 backups are configured, feeds have freshness monitoring, notifications are
 tested end-to-end, public scores are clearly labeled and human-reviewed, and
 disaster stakeholders have completed a tabletop exercise.
+
+## Current simulation handoff
+
+Admin-only synthetic simulation now supports custom cyclone routes, 24-hour
+replay, 30 Odisha district impacts, 36 synthetic India state summaries, saved
+runs, and three downloadable evidence reports. The normal live map remains
+separate from the simulation map. See [test3.md](./test3.md) and
+[sarthak.md](./sarthak.md).
+
+This does not change the deployment gate: the simulation is not an official
+forecast, live alert source, or proof of 10,000-user readiness.

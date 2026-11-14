@@ -73,3 +73,14 @@ responders.
 - Disable `ALLOW_ADMIN_REGISTRATION=true` before public deployment.
 - Use Atlas least-privilege credentials, HTTPS, monitoring, rate limits,
   backups, restore tests, load tests, and rollback procedures.
+
+## Simulation boundary
+
+- Simulation routes and report retrieval are admin-only.
+- Every timestep and state summary retains `synthetic_simulation` provenance.
+- Synthetic cyclone paths must never enter the normal user map, live cyclone
+  feed, public notifications, SOS, dispatch records, or RAG index.
+- Browser downloads are evidence exports, not official forecasts or immutable
+  production records.
+- Saved run IDs and persisted timesteps must remain available for review.
+- The 36-state simulation table is synthetic context, not live India telemetry.

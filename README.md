@@ -11,6 +11,25 @@ foundation are implemented. The flood model is not an operational alert model,
 and the retrieval foundation does not call an LLM until a provider and
 document-review process are configured.
 
+## Contributor handoff index
+
+Read these before changing the project:
+
+- [goal.md](./goal.md): mission and deployable definition.
+- [precaution.md](./precaution.md): safety, privacy, live-data, AI, and
+  simulation boundaries.
+- [work.md](./work.md): current implementation, routes, commands, and gates.
+- [simulation_test_plan.md](./simulation_test_plan.md): authoritative simulator
+  scope and isolation design.
+- [test3.md](./test3.md): latest full 24-hour simulation test.
+- [sarthak.md](./sarthak.md): current admin visibility, saved runs, and map
+  separation.
+- [help.md](./help.md): startup and manual verification checklist.
+
+Do not treat synthetic simulation data as live weather or an official forecast.
+Preserve the live/synthetic boundary and update the relevant test document
+when behavior changes.
+
 ## Completed backend work
 
 - Added production-oriented User, Household, and SOS incident schemas.
@@ -148,6 +167,15 @@ Authentication endpoints:
 - `POST /api/prediction/simulate` for admins; always returns `SIMULATED`
 - `GET /api/notifications` for authenticated users
 - `POST /api/notifications` for admins
+- `POST /api/simulation/scenarios` for admins
+- `GET /api/simulation/scenarios` for admins
+- `POST /api/simulation/runs` for admins
+- `GET /api/simulation/runs` for admins
+- `GET /api/simulation/runs/:id` for admins
+- `GET /api/simulation/runs/:id/report` for admins
+- `POST /api/simulation/runs/:id/step` for admins
+- `POST /api/simulation/runs/:id/pause` for admins
+- `POST /api/simulation/runs/:id/heartbeat` for admins
 
 ### ML service
 
