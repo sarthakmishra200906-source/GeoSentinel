@@ -1590,6 +1590,51 @@ body,
   margin-top: 18px;
 }
 
+.simulation-timeline,
+.simulation-map-panel {
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.simulation-timeline-header,
+.simulation-map-heading,
+.simulation-timeline-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.simulation-timeline-header span,
+.simulation-map-heading span {
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.simulation-timeline input {
+  width: 100%;
+  margin: 14px 0 8px;
+  accent-color: #0f766e;
+}
+
+.simulation-timeline-actions button {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: #f8fafc;
+  color: #334155;
+  cursor: pointer;
+}
+
+.simulation-map {
+  height: 360px;
+  margin-top: 12px;
+  border-radius: 12px;
+}
+
 .simulation-metric,
 .simulation-districts {
   padding: 13px;
@@ -1633,6 +1678,11 @@ body,
 
   .simulation-results {
     grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+
+  .simulation-timeline-header,
+  .simulation-map-heading {
+    display: grid;
   }
 }
 

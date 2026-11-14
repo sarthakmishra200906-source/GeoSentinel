@@ -56,7 +56,22 @@ Current ready-to-test boundary: an admin can create an Odisha scenario, create
  switching, reports/object storage, resource locking, historical calibration,
  and production cloud scale testing remain intentionally incomplete.
 
-### Admin dashboard UX update
+ The simulation route registration bug was fixed after the first browser test:
+ step, pause, heartbeat, and run-detail routes had accidentally been declared
+ inside the pause handler and therefore were not registered by Express. They
+ are now router-scoped, audit `simulation.run.step`, and were verified through
+ the browser with run `6af8c15a101f794f4e551eb1`: READY hour 0 -> RUNNING hour
+ 1 -> PAUSED hour 1. No notification or SOS record was created during the run.
+
+ The simulation workspace now includes a Leaflet test map with a synthetic
+ cyclone track from the offshore start point toward the Odisha target corridor,
+ current cyclone marker, target radius, risk state, and cyclone popup details.
+ The hourly replay slider and previous/next controls let an admin move the
+ display backward or forward across generated steps without mutating server
+ truth. Outside the simulation workspace, the existing user map continues to
+ use its normal live-weather/cyclone behavior.
+
+ ### Admin dashboard UX update
 
 The legacy one-click “ML Flood Simulation / Run Heavy-Rain Inference
 Simulation” control was removed from the dashboard because it duplicated and
