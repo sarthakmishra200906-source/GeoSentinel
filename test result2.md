@@ -1,0 +1,316 @@
+# GeoSentinel Test Result 2
+
+**Test date:** 2026-11-15  
+**Test scope:** Local admin cyclone/flood rehearsal and dashboard usability  
+**Geography:** Odisha synthetic test scope  
+**Latest commit tested:** `f1d6a0a`  
+**Environment:** Local Vite frontend, local Express backend, local MongoDB
+
+## 1. Executive result
+
+The local admin rehearsal is working for its intended bounded scope:
+
+- An admin can create a synthetic Odisha cyclone scenario.
+- The admin can configure a cyclone start point, target point, wind, rainfall,
+  duration, exposed institutions, and shelters.
+- The admin can create a run and advance it one synthetic hour at a time.
+- The run generated data through synthetic hour 12.
+- The map displayed the synthetic track and current cyclone position.
+- The timeline moved backward for replay without changing server truth.
+- The dashboard displayed 30 Odisha district result cards.
+- The hourly insight chart rendered.
+- The audit panel was searchable, filterable, paginated, and scrollable.
+- The backend health endpoint returned HTTP 200.
+- No live notification or SOS record was created by the simulation.
+
+This is a **rehearsal and decision-support feature**, not proof of an official
+forecast, hydrodynamic flood model, production dispatch system, or cloud-scale
+concurrent cyclone platform.
+
+## 2. Commands and automated results
+
+Commands were run from each package's owning directory:
+
+```powershell
+cd Backend\server
+npm test
+```
+
+Result: **13 passed, 0 failed**.
+
+The passing tests covered:
+
+- Admin role protection.
+- Rescue-center optimistic-concurrency behavior.
+- FAQ cache behavior and invalid input handling.
+- Simulation parameter defaults and bounds.
+- Required scenario name validation.
+- Deterministic simulation-engine progression.
+
+```powershell
+cd Frontend\Resq-AI
+npm run build
+```
+
+Result: **Build passed**. Vite transformed 70 modules and produced the
+production bundle. Vite reported a bundle-size warning for a chunk larger than
+500 kB; this is a performance follow-up, not a build failure.
+
+```powershell
+Invoke-WebRequest http://localhost:5000/api/health
+```
+
+Result: **HTTP 200**.
+
+## 3. Browser rehearsal result
+
+The browser rehearsal used the Admin Dashboard and Simulation section:
+
+1. Reloaded the application.
+2. Opened Admin Dashboard.
+3. Opened the Simulation section.
+4. Created a test run.
+5. Advanced the run 12 times with `Step +1 hour`.
+6. Confirmed the run showed `RUNNING` and synthetic hour 12.
+7. Moved the replay timeline backward.
+8. Confirmed the map and chart remained rendered.
+9. Confirmed 30 district result cards were present.
+
+Observed result:
+
+```text
+RUNNING · synthetic hour 12
+Map rendered: yes
+Hourly chart rendered: yes
+District cards: 30
+Timeline slider: rendered and moved backward
+```
+
+The timeline is a display replay. Moving backward does not delete timesteps or
+rewind the server run. This prevents an admin's visual review from corrupting
+the authoritative run sequence.
+
+## 4. Backend and simulation work completed
+
+### Simulation API
+
+The admin-only simulation API now supports:
+
+- `POST /api/simulation/scenarios`
+- `GET /api/simulation/scenarios`
+- `POST /api/simulation/runs`
+- `GET /api/simulation/runs/:id`
+- `POST /api/simulation/runs/:id/step`
+- `POST /api/simulation/runs/:id/pause`
+- `POST /api/simulation/runs/:id/heartbeat`
+
+The earlier step-route failure was fixed by moving the step, pause, heartbeat,
+and run-detail routes to router scope. The step action records an audit event.
+
+### Rule-matrix engine
+
+The current engine calculates bounded synthetic values for:
+
+- Cyclone approach progress.
+- Wind signal.
+- Rainfall signal.
+- River signal.
+- Soil saturation signal.
+- District risk tier.
+- Institutional exposure.
+- Shelter pressure.
+- Advisory demand for response resources.
+
+The output is marked `synthetic_simulation`. It does not claim exact flood
+depth, storm surge, building damage, road-level inundation, or official
+forecast accuracy.
+
+### Safety isolation
+
+The simulation is intentionally isolated from:
+
+- Live weather and cyclone records.
+- Live user alerts and notifications.
+- SOS incidents.
+- Emergency reports.
+- Rescue-center inventory mutations.
+- User dispatches.
+- Approved government RAG documents.
+- SMS, email, push, and external emergency-service calls.
+
+The UI explicitly tells the admin that no live alert, SOS, or dispatch is
+created by the rehearsal.
+
+## 5. Admin UI improvements
+
+The admin dashboard was changed from a long, confusing surface into a
+section-based workspace:
+
+- Added navigation for Overview, Simulation, Operations,
+  Guidelines/Upload, and Audit Log.
+- Kept the dashboard full-screen oriented and scrollable.
+- Replaced the misleading one-click
+  `ML Flood Simulation / Run Heavy-Rain Inference Simulation` control.
+- Added a clearly labeled flood-risk model status card.
+- Linked the model status area to the dedicated simulation workspace.
+- Preserved guideline upload/RAG management.
+- Preserved rescue-center management.
+- Preserved notifications and operational views.
+- Added a fixed-height audit region so repeated simulation events do not
+  create an uncontrolled page-length wall of text.
+- Added audit search.
+- Added audit category filtering.
+- Added local 25-row pagination.
+- Added clear simulation-mode messaging and run status.
+- Added responsive styling for simulation controls, map, chart, and audit
+  sections.
+
+The audit UI currently paginates the backend response locally. The backend
+still returns a bounded maximum event set, so cursor pagination is required
+before very high-volume production use.
+
+## 6. Map implementation and map suggestions
+
+The admin simulation map is a separate Leaflet map inside the simulation
+workspace. It includes:
+
+- Synthetic cyclone start marker.
+- Odisha target corridor marker.
+- Polyline showing generated cyclone movement.
+- Current cyclone marker.
+- Target-radius circle.
+- Popup details for the selected synthetic timestep.
+- Current risk state and weather/impact information.
+- Previous-hour and next-hour controls.
+- Range slider for replay.
+
+The normal user map remains separate and keeps its normal live-weather and
+live-cyclone behavior outside simulation mode.
+
+### Map suggestions implemented
+
+The requested map direction was interpreted as:
+
+1. Keep simulation playback separate from the live user map.
+2. Show the cyclone path and position during an admin rehearsal.
+3. Make the path reviewable hour by hour.
+4. Keep street-map context through Leaflet tiles.
+5. Add operational map layers later for shelters, hospitals, fire stations,
+   rescue centers, roads, and response units.
+
+Items still required for the complete operational map:
+
+- Rescue-center, hospital, fire-station, shelter, and unit markers.
+- Resource allocation overlays for ambulance, fire, and NDRF teams.
+- District-by-hour rainfall and wind overlays.
+- Road closure and accessibility layers.
+- Storm-surge and inundation layers from validated external data or a future
+  physical model.
+- Server-generated report map snapshots.
+
+The current map is therefore a functional synthetic track/replay map, not a
+complete GIS operations map.
+
+## 7. Were live alerts, user messages, help, AI, and all services tested
+    together during a cyclone?
+
+**No. That combined production scenario was not proven by this test.**
+
+The test deliberately ran the isolated simulation boundary. It verified that
+the simulation did **not** create live alerts or SOS records. That is a
+successful isolation result, but it is not the same as proving every live
+service under simultaneous cyclone load.
+
+### What is present
+
+- Live weather/map behavior exists outside simulation mode.
+- Admin notification broadcasting exists as a separate operational action.
+- SOS/report flows exist as separate live workflows.
+- The grounded AI/chat boundary exists and is intended to answer from
+  approved documents with citations or refuse when evidence is missing.
+- Flood-risk model responses distinguish live, stale, simulated, and
+  unavailable states in the broader platform design.
+
+### What this rehearsal did not prove
+
+- A real live cyclone feed arriving while a synthetic rehearsal is running.
+- Simultaneous high-volume public alerts and user messages.
+- User help/chat responses under cyclone traffic.
+- SOS creation and operator acknowledgement during the same run.
+- Live AI answers using current cyclone data plus approved RAG evidence.
+- SMS, email, push, or external emergency dispatch delivery.
+- WebSocket/SSE fan-out to many users.
+- Multiple concurrent cyclone runs.
+- Cloud failover, provider outage behavior, or 100+ concurrent users.
+- Production-scale MongoDB, object storage, queue, and rate-limit behavior.
+
+The correct current conclusion is:
+
+> The system can demonstrate an isolated admin cyclone rehearsal locally.
+> The live operations stack and the simulator are not yet a tested,
+> simultaneously coordinated cyclone command platform.
+
+## 8. What was done for the previous request
+
+The previous request asked for a complete admin test of one cyclone, impact
+analysis, custom paths, hourly data, resource planning, graphs, PDF output,
+map context, auditability, and documentation. The implemented portion was:
+
+- Added custom cyclone start and target coordinates.
+- Expanded the rule engine to all 30 Odisha districts.
+- Added hourly district/risk/rainfall/river insight output.
+- Added an insights chart to the simulation workspace.
+- Added a print/save-to-PDF browser report action.
+- Added audit search, category filters, pagination, and fixed-height scrolling.
+- Added the admin simulation map and timeline replay.
+- Verified a 12-hour browser rehearsal.
+- Re-ran backend tests and frontend production build.
+- Verified backend health.
+- Committed the changes as `f1d6a0a`.
+
+The request also asked for many response-resource types, state-neighbor data,
+people reports, a final immutable PDF report, and repeated analysis of 100
+cyclones. Those parts are not fully implemented. The current engine has
+advisory resource-demand calculations, but not a complete allocation and
+reservation system. The current report uses browser print/save-to-PDF, not a
+server-generated immutable object-storage artifact.
+
+## 9. Interpretation of the previous request
+
+The request was interpreted as four separate deliverables:
+
+1. **A safe rehearsal simulator:** create and replay one bounded Odisha
+   cyclone without touching live operations.
+2. **An admin command view:** make the dashboard usable for scenario setup,
+   map review, charts, audit review, and report printing.
+3. **An evidence view:** show hourly synthetic outputs across Odisha districts
+   and make assumptions visible.
+4. **A future production roadmap:** identify the work needed for resources,
+   live user coordination, validated data, concurrent runs, and cloud scale.
+
+Only the first three were implemented in bounded local form. The fourth remains
+planned work and must not be represented as already production-ready.
+
+## 10. Remaining gates before live cyclone operations
+
+Before calling the system ready for live cyclone operations, complete and test:
+
+- Backend cursor pagination for audit events.
+- Resource models for ambulances, fire teams, NDRF teams, members, boats,
+  supplies, and reservations.
+- Atomic allocation with optimistic concurrency and conflict handling.
+- Operational map markers and district/hour data layers.
+- Server-generated signed report artifacts and object storage.
+- Live cyclone/weather ingestion with source timestamps and staleness rules.
+- Explicit simulation/live context handling for approved user viewers.
+- WebSocket/SSE streaming with reconnect and ordering guarantees.
+- Grounded AI retrieval combining approved documents and explicitly labeled
+  live telemetry.
+- End-to-end notification, chat, SOS, and operator workflow tests.
+- Provider outage, delayed data, duplicate event, and partial failure tests.
+- Staging load tests and cloud rollback rehearsal.
+- Security, authorization, rate-limit, backup, and audit-retention review.
+
+Until those gates pass, use the simulator for local rehearsal and UI/workflow
+testing only. Do not use it as an official emergency forecast or autonomous
+dispatch authority.

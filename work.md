@@ -81,6 +81,14 @@ model status card and links to the dedicated Odisha simulation workspace.
 Existing charts, document upload/RAG management, rescue-center operations,
 notifications, and audit log remain available through the section navigator.
 
+### Test Result 2 documentation
+
+The detailed local rehearsal record is in [test result2.md](./test%20result2.md).
+It records the 12-hour browser rehearsal, 13 passing backend tests, frontend
+build, health check, admin UX changes, map behavior, isolation result, and the
+important limitation that live alerts, user help/chat, SOS, notifications, and
+AI were not proven as a single concurrent production cyclone workflow.
+
 ### Already present
 
 - React/Vite frontend with an India-centered Leaflet weather map.
