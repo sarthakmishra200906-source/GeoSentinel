@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Bar, Line } from 'react-chartjs-2'
+import SimulationWorkspace from './SimulationWorkspace'
 import {
   BarElement,
   CategoryScale,
@@ -17,6 +18,7 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointEleme
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
 export default function AdminDashboard({ token, onSwitchToMap }) {
+  const [activeSection, setActiveSection] = useState('overview')
   const [guidelines, setGuidelines] = useState([])
   const [verifications, setVerifications] = useState([])
   const [message, setMessage] = useState('')
@@ -330,6 +332,20 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
 
   return (
     <div className="admin-dashboard">
+      <nav className="admin-section-nav" aria-label="Admin dashboard sections">
+        {[
+          ['overview', 'Overview'],
+          ['simulation', 'Simulation'],
+          ['operations', 'Operations'],
+          ['guidelines', 'Guidelines & upload'],
+          ['audit', 'Audit log'],
+        ].map(([id, label]) => (
+          <button key={id} type="button" className={activeSection === id ? 'active' : ''} onClick={() => {
+            setActiveSection(id)
+            document.getElementById(`admin-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }}>{label}</button>
+        ))}
+      </nav>
       <div className="admin-dashboard-toolbar">
         <div>
           <h2>Admin dashboard</h2>
@@ -339,7 +355,7 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
           🗺️ Open map
         </button>
       </div>
-      <h3>System Health</h3>
+      <div id="admin-overview"><h3>System Health</h3></div>
       <p>
         {health
           ? Object.entries(health)
@@ -538,7 +554,8 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
         </button>
       </form>
 
-      <h3>Rescue Centers (Manage & Upload)</h3>
+      <div id="admin-simulation"><SimulationWorkspace token={token} /></div>
+      <div id="admin-operations"><h3>Rescue Centers (Manage & Upload)</h3></div>
       <form
         className="auth-form"
         onSubmit={(event) => saveCenter(event).catch((error) => setMessage(error.message))}
@@ -677,7 +694,7 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
         </p>
       ))}
 
-      <h3>Official Guidelines & Document Upload</h3>
+      <div id="admin-guidelines"><h3>Official Guidelines &amp; Document Upload</h3></div>
       <form
         className="auth-form"
         onSubmit={(event) => upload(event).catch((error) => setMessage(error.message))}
@@ -746,7 +763,7 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
         </p>
       ))}
 
-      <h3>Audit Log</h3>
+      <div id="admin-audit"><h3>Audit Log</h3></div>
       {auditEvents.map((event) => (
         <p key={event._id}>
           {new Date(event.createdAt).toLocaleString()} · {event.action} · {event.oldStatus || '—'} →{' '}

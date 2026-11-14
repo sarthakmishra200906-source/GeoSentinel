@@ -33,6 +33,29 @@ WebSocket/SSE stream, live-vs-simulation context middleware, resource locking,
 reports/object storage, insights, historical calibration, or ML review flow.
 Do not add those surfaces by bypassing the models and audit boundary above.
 
+### Simulation readiness implementation update
+
+The simulation foundation has now advanced to a runnable local rehearsal:
+
+- Added bounded deterministic Odisha rule-matrix step calculation for cyclone
+  approach, rainfall, river signal, district risk, institutional exposure,
+  and advisory resource demand.
+- Added `SimulationTimestep` storage with run/sequence indexes.
+- Added admin-only run snapshot, one-hour step, pause, and heartbeat routes.
+- Added a full-screen-ready admin simulation workspace with adjustable
+  approach distance, wind, rainfall, duration, institutions, and shelters.
+- Added explicit simulation banner and no-live-alert/no-dispatch messaging.
+- Added admin section navigation for Overview, Simulation, Operations,
+  Guidelines/upload, and Audit log while preserving the existing scrollable
+  dashboard surfaces.
+- Added deterministic simulation validation tests.
+
+Current ready-to-test boundary: an admin can create an Odisha scenario, create
+ a run, advance synthetic hourly steps, inspect district risk/resource demand,
+ and pause the run. WebSocket streaming, live-user simulation context
+ switching, reports/object storage, resource locking, historical calibration,
+ and production cloud scale testing remain intentionally incomplete.
+
 ### Already present
 
 - React/Vite frontend with an India-centered Leaflet weather map.

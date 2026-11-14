@@ -2,6 +2,7 @@ import { Router } from 'express'
 import crypto from 'node:crypto'
 import SimulationScenario from '../models/SimulationScenario.js'
 import SimulationRun from '../models/SimulationRun.js'
+import SimulationTimestep from '../models/SimulationTimestep.js'
 import { requireAdmin } from '../middleware/admin.js'
 import { recordAuditEvent } from '../services/audit.js'
 import { validateSimulationName, validateSimulationParameters } from '../services/simulationValidation.js'
@@ -95,6 +96,66 @@ router.post('/runs/:id/pause', ...requireAdmin, async (request, response, next) 
       targetType: 'SimulationRun',
       targetId: run._id,
       reason: request.body.reason || 'Admin pause',
+    })
+
+    router.get('/runs/:id', ...requireAdmin, async (request, response, next) => {
+      try {
+        const run = await SimulationRun.findOne({
+          _id: request.params.id,
+          $or: [{ owner: request.user._id }, { collaborators: request.user._id }],
+        }).populate('scenario')
+        if (!run) return response.status(404).json({ error: 'Simulation run not found' })
+        const timesteps = await SimulationTimestep.find({ runId: run._id }).sort({ sequence: -1 }).limit(72).lean()
+        response.json({ run, timesteps: timesteps.reverse(), simulationMode: true })
+      } catch (error) {
+        next(error)
+      }
+    })
+
+    router.post('/runs/:id/step', ...requireAdmin, async (request, response, next) => {
+      try {
+        const run = await SimulationRun.findOne({
+          _id: request.params.id,
+          owner: request.user._id,
+          status: { $in: ['READY', 'RUNNING', 'PAUSED', 'LAGGING'] },
+        }).populate('scenario')
+        if (!run) return response.status(404).json({ error: 'Steppable simulation run not found' })
+        const { calculateSimulationStep } = await import('../services/simulationEngine.js')
+        const timestep = calculateSimulationStep(run.scenario.parameters, run.sequence + 1, run.simulationTime)
+        const created = await SimulationTimestep.create({
+          runId: run._id,
+          sequence: run.sequence + 1,
+          timestamp: timestep.timestamp,
+          dataSource: 'synthetic_simulation',
+          cyclone: timestep.cyclone,
+          weather: timestep.weather,
+          impacts: timestep.impacts,
+          recommendations: timestep.recommendations,
+          ruleVersion: run.scenario.rulesetVersion,
+        })
+        run.sequence = created.sequence
+        run.simulationTime = created.timestamp
+        run.status = 'RUNNING'
+        run.ownerHeartbeatAt = new Date()
+        await run.save()
+        response.json({ run, timestep: created, simulationMode: true })
+      } catch (error) {
+        next(error)
+      }
+    })
+
+    router.post('/runs/:id/heartbeat', ...requireAdmin, async (request, response, next) => {
+      try {
+        const run = await SimulationRun.findOneAndUpdate(
+          { _id: request.params.id, owner: request.user._id, status: { $in: ['READY', 'RUNNING', 'PAUSED', 'LAGGING'] } },
+          { $set: { ownerHeartbeatAt: new Date() } },
+          { new: true },
+        )
+        if (!run) return response.status(404).json({ error: 'Simulation run not found' })
+        response.json({ run, simulationMode: true })
+      } catch (error) {
+        next(error)
+      }
     })
     response.json({ ...run.toObject(), simulationMode: true })
   } catch (error) {

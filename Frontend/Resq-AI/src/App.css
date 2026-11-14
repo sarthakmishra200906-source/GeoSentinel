@@ -1496,6 +1496,146 @@ body,
   padding: 32px 0 64px;
 }
 
+.admin-section-nav {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 0 16px;
+  background: linear-gradient(180deg, #f8fafc 80%, rgba(248, 250, 252, 0));
+}
+
+.admin-section-nav button {
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  padding: 9px 14px;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.admin-section-nav button.active,
+.admin-section-nav button:hover {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #fff;
+}
+
+.admin-dashboard [id^="admin-"] {
+  scroll-margin-top: 76px;
+}
+
+.simulation-workspace {
+  margin: 20px 0 32px;
+  padding: 20px;
+  border: 1px solid #bae6fd;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #f0f9ff, #f8fafc);
+}
+
+.simulation-banner {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #991b1b;
+  color: #fff;
+  font-size: 0.85rem;
+}
+
+.simulation-workspace-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin: 20px 0;
+}
+
+.simulation-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.simulation-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+}
+
+.simulation-controls label {
+  display: grid;
+  gap: 5px;
+  color: #475569;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.simulation-controls input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 9px;
+}
+
+.simulation-results {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.simulation-metric,
+.simulation-districts {
+  padding: 13px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+}
+
+.simulation-metric {
+  display: grid;
+  gap: 5px;
+}
+
+.simulation-metric span,
+.simulation-districts span {
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.simulation-districts {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.simulation-districts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+@media (max-width: 700px) {
+  .simulation-banner,
+  .simulation-workspace-header {
+    display: grid;
+  }
+
+  .simulation-results {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+}
+
 .weather-report {
   margin: 28px 0;
   padding: 20px;
