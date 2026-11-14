@@ -525,3 +525,37 @@ not change the previous strict rejection of full live multi-system and
 10,000-user readiness. Live notifications, SOS, user help, grounded AI,
 provider delivery, and cloud concurrency still require separate integrated
 staging tests.
+
+## 13. Navigation consolidation follow-up
+
+The shared-screen review found that the earlier admin redesign had introduced
+two side-by-side navigation systems: the global application sidebar and a
+separate admin section rail. That was poor basic website navigation and could
+make the content feel clipped or crowded.
+
+The fix was to remove the second admin rail and place the five admin workspace
+links inside the existing global sidebar under one `ADMIN WORKSPACE` group.
+The single sidebar now contains:
+
+- Guidelines.
+- Help now.
+- Admin dashboard.
+- Admin workspace: Overview, Simulation, Operations, Guidelines &amp; upload,
+  and Audit log.
+- Map.
+- AI assistant.
+- Notifications.
+- Log out.
+
+Browser verification after the change confirmed:
+
+```text
+Second admin rail (.admin-section-nav): 0
+Admin workspace group: 1
+Simulation view visible after selecting Simulation: yes
+Overview content visible in Simulation view: no
+```
+
+The frontend build passed after this consolidation. The remaining browser
+console error is the existing third-party Windy iframe `paramsChanged` warning
+and is unrelated to the admin navigation change.

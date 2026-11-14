@@ -164,9 +164,30 @@ export default class Navbar extends Component {
                   </button>
                 )}
                 {this.props.activeView === 'admin' && (
-                  <button className="menu-item" type="button" onClick={() => this.props.onNavigate('map')}>
-                    Map
-                  </button>
+                  <>
+                    <div className="admin-nav-group" aria-label="Admin workspace">
+                      <span className="admin-nav-heading">Admin workspace</span>
+                      {[
+                        ['overview', 'Overview'],
+                        ['simulation', 'Simulation'],
+                        ['operations', 'Operations'],
+                        ['guidelines', 'Guidelines & upload'],
+                        ['audit', 'Audit log'],
+                      ].map(([section, label]) => (
+                        <button
+                          key={section}
+                          className={`menu-item admin-nav-item ${this.props.adminSection === section ? 'active' : ''}`}
+                          type="button"
+                          onClick={() => this.props.onAdminSection(section)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <button className="menu-item" type="button" onClick={() => this.props.onNavigate('map')}>
+                      Map
+                    </button>
+                  </>
                 )}
                 <button className="menu-item" type="button" onClick={() => this.openCard('ai')}>
                   AI assistant

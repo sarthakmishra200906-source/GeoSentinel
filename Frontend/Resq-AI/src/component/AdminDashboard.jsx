@@ -17,8 +17,7 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointEleme
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
-export default function AdminDashboard({ token, onSwitchToMap }) {
-  const [activeSection, setActiveSection] = useState('overview')
+export default function AdminDashboard({ token, activeSection = 'overview', onSwitchToMap }) {
   const [guidelines, setGuidelines] = useState([])
   const [verifications, setVerifications] = useState([])
   const [message, setMessage] = useState('')
@@ -338,17 +337,6 @@ export default function AdminDashboard({ token, onSwitchToMap }) {
 
   return (
     <div className="admin-dashboard">
-      <nav className="admin-section-nav" aria-label="Admin dashboard sections">
-        {[
-          ['overview', 'Overview'],
-          ['simulation', 'Simulation'],
-          ['operations', 'Operations'],
-          ['guidelines', 'Guidelines & upload'],
-          ['audit', 'Audit log'],
-        ].map(([id, label]) => (
-          <button key={id} type="button" className={activeSection === id ? 'active' : ''} onClick={() => setActiveSection(id)}>{label}</button>
-        ))}
-      </nav>
       <div className="admin-dashboard-toolbar">
         <div>
           <h2>Admin dashboard</h2>

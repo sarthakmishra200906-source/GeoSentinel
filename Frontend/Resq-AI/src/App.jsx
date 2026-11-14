@@ -7,6 +7,7 @@ import './App.css'
 export default class App extends Component {
   state = {
     activeView: 'map',
+    adminSection: 'overview',
     user: (() => {
       const storedUser = localStorage.getItem('resq-ai-user')
       if (!storedUser) return null
@@ -46,10 +47,17 @@ export default class App extends Component {
           onAuthenticated={this.handleAuthenticated}
           onLogout={this.handleLogout}
           activeView={this.state.activeView}
+          adminSection={this.state.adminSection}
+          onAdminSection={(adminSection) => this.setState({ adminSection })}
           onNavigate={this.handleNavigate}
         />
         {isAdminView ? (
-          <AdminDashboard token={this.state.token} onSwitchToMap={() => this.handleNavigate('map')} />
+          <AdminDashboard
+            token={this.state.token}
+            activeSection={this.state.adminSection}
+            onSectionChange={(adminSection) => this.setState({ adminSection })}
+            onSwitchToMap={() => this.handleNavigate('map')}
+          />
         ) : (
           <MapContainer />
         )}
