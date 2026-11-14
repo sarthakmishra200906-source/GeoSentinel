@@ -96,6 +96,36 @@ router.get('/runs/:id', ...requireAdmin, async (request, response, next) => {
   }
 })
 
+router.get('/runs/:id/report', ...requireAdmin, async (request, response, next) => {
+  try {
+    const run = await SimulationRun.findOne({
+      _id: request.params.id,
+      $or: [{ owner: request.user._id }, { collaborators: request.user._id }],
+    }).populate('scenario')
+    if (!run) {
+      response.status(404).json({ error: 'Simulation run not found' })
+      return
+    }
+    const timesteps = await SimulationTimestep.find({ runId: run._id }).sort({ sequence: 1 }).lean()
+    const peak = timesteps.reduce((current, item) => !current || item.impacts.riskScore > current.impacts.riskScore ? item : current, null)
+    response.json({
+      reportType: 'simulation_evidence_pack',
+      dataSource: 'synthetic_simulation',
+      run: run.toObject(),
+      scenario: run.scenario,
+      timesteps,
+      summary: {
+        hours: timesteps.length,
+        peakRisk: peak ? { hour: peak.sequence, tier: peak.impacts.riskTier, score: peak.impacts.riskScore } : null,
+        userHelpStatus: 'isolated_no_live_help_or_sos_created',
+        aiInsightStatus: 'rule_matrix_only_no_synthetic_prompt_sent',
+      },
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
 router.post('/runs/:id/step', ...requireAdmin, async (request, response, next) => {
   try {
     const run = await SimulationRun.findOne({

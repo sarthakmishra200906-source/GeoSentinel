@@ -7,6 +7,16 @@ const DISTRICTS = [
   'Sundargarh',
 ]
 
+const STATES = [
+  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
+  'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka',
+  'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram',
+  'Nagaland', 'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu',
+  'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
+  'Andaman and Nicobar Islands', 'Chandigarh', 'Dadra and Nagar Haveli and Daman and Diu',
+  'Delhi', 'Jammu and Kashmir', 'Ladakh', 'Lakshadweep', 'Puducherry',
+]
+
 function clamp(value, min = 0, max = 1) {
   return Math.max(min, Math.min(max, value))
 }
@@ -47,6 +57,19 @@ export function calculateSimulationStep(parameters, sequence, previousTimestamp)
       },
     }
   })
+  const states = STATES.map((name, index) => {
+    const proximity = name === 'Odisha' ? 1 : 0.62 + (index % 7) * 0.04
+    const stateScore = clamp(score * proximity)
+    return {
+      state: name,
+      riskScore: Number(stateScore.toFixed(4)),
+      riskTier: tier(stateScore),
+      rainfallMm: Number((rainfall.hourlyMm * proximity).toFixed(1)),
+      riverDischargeM3s: Number((river * 2500 * proximity).toFixed(1)),
+      temperatureC: Number((28 - approach * 2 + rain * 1.5 + (index % 4) * 0.5).toFixed(1)),
+      dataSource: 'synthetic_simulation',
+    }
+  })
   const critical = districts.filter((item) => item.riskTier === 'CRITICAL').length
   return {
     timestamp,
@@ -71,6 +94,7 @@ export function calculateSimulationStep(parameters, sequence, previousTimestamp)
       riskTier: tier(score),
       criticalDistricts: critical,
       districts,
+      states,
     },
     recommendations: {
       priority: tier(score),

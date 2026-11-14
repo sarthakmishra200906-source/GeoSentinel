@@ -41,6 +41,8 @@ test('simulation engine advances deterministic synthetic district results', () =
   const repeat = calculateSimulationStep(parameters, 1, '2026-11-15T00:00:00.000Z')
   assert.deepEqual(first, repeat)
   assert.equal(first.impacts.districts.length, 30)
+  assert.equal(first.impacts.states.length, 36)
+  assert.equal(first.impacts.states.find((item) => item.state === 'Odisha').riskTier, first.impacts.riskTier)
   assert.equal(first.weather.hourlyRainfallMm, 180)
   assert.equal(typeof first.weather.riverDischargeM3s, 'number')
   assert.equal(typeof first.weather.temperatureC, 'number')

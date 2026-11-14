@@ -5,6 +5,19 @@ import 'leaflet/dist/leaflet.css'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
+function downloadFile(filename, content, type) {
+  const url = URL.createObjectURL(new Blob([content], { type }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function csvCell(value) {
+  return `"${String(value ?? '').replaceAll('"', '""')}"`
+}
+
 export default function SimulationWorkspace({ token }) {
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token])
   const [scenario, setScenario] = useState({
@@ -138,6 +151,32 @@ export default function SimulationWorkspace({ token }) {
         rescueTeams: total.rescueTeams + item.rescueTeams,
       }), { boats: 0, paramedics: 0, rescueTeams: 0 })
     : { boats: 0, paramedics: 0, rescueTeams: 0 }
+  const runStamp = run?._id || 'simulation'
+  const downloadSummary = () => {
+    downloadFile(`${runStamp}-executive-summary.json`, JSON.stringify({
+      reportType: 'simulation_executive_summary',
+      dataSource: 'synthetic_simulation',
+      runId: run?._id,
+      scenario,
+      peakStep,
+      viewedStep: selectedStep,
+      userHelpStatus: 'isolated_no_live_help_or_sos_created',
+      aiInsightStatus: 'rule_matrix_only_no_synthetic_prompt_sent',
+      limitation: 'Not an official forecast or hydrodynamic model.',
+    }, null, 2), 'application/json')
+  }
+  const downloadHourly = () => {
+    const rows = [
+      ['run_id', 'hour', 'timestamp', 'risk_tier', 'risk_score', 'rainfall_mm_per_hour', 'river_signal', 'river_discharge_proxy_m3s', 'temperature_proxy_c', 'cyclone_wind_kmh', 'distance_to_odisha_km'],
+      ...steps.map((item) => [run?._id, item.sequence, item.timestamp, item.impacts.riskTier, item.impacts.riskScore, item.weather.hourlyRainfallMm, item.weather.riverSignal, item.weather.riverDischargeM3s, item.weather.temperatureC, item.cyclone.windSpeedKmh, item.cyclone.distanceToOdishaKm]),
+    ]
+    downloadFile(`${runStamp}-hourly-telemetry.csv`, rows.map((row) => row.map(csvCell).join(',')).join('\n'), 'text/csv;charset=utf-8')
+  }
+  const downloadStateImpacts = () => {
+    const rows = [['run_id', 'hour', 'state', 'risk_tier', 'risk_score', 'rainfall_mm_per_hour', 'river_discharge_proxy_m3s', 'temperature_proxy_c', 'data_source']]
+    steps.forEach((item) => item.impacts.states.forEach((state) => rows.push([run?._id, item.sequence, state.state, state.riskTier, state.riskScore, state.rainfallMm, state.riverDischargeM3s, state.temperatureC, state.dataSource])))
+    downloadFile(`${runStamp}-india-state-impacts.csv`, rows.map((row) => row.map(csvCell).join(',')).join('\n'), 'text/csv;charset=utf-8')
+  }
 
   return (
     <section className="simulation-workspace" aria-labelledby="simulation-title">
@@ -260,7 +299,12 @@ export default function SimulationWorkspace({ token }) {
               <h4 id="simulation-outcome-title">Cyclone outcome, help and insight summary</h4>
               <p>Odisha values below are synthetic rule-matrix outputs. Live India telemetry remains in the Overview tab.</p>
             </div>
-            <button type="button" onClick={() => window.print()}>Print final summary PDF</button>
+            <div className="simulation-report-actions">
+              <button type="button" onClick={downloadSummary}>Download executive summary</button>
+              <button type="button" onClick={downloadHourly}>Download hourly telemetry</button>
+              <button type="button" onClick={downloadStateImpacts}>Download India state impacts</button>
+              <button type="button" onClick={() => window.print()}>Print final summary PDF</button>
+            </div>
           </div>
           <div className="simulation-outcome-grid">
             <div><span>Peak risk</span><strong>{peakStep.impacts.riskTier} · {Math.round(peakStep.impacts.riskScore * 100)}%</strong><small>Hour {peakStep.sequence}</small></div>
@@ -291,6 +335,15 @@ export default function SimulationWorkspace({ token }) {
             {selectedStep.impacts.districts.map((district) => (
               <div className="simulation-hour-row" key={district.district}>
                 <strong>{district.district}</strong><span>{district.riskTier}</span><span>{district.rainfallMm} mm/h</span><span>{Math.round(district.riverSignal * 100)}%</span><span>{district.exposedInstitutions}</span>
+              </div>
+            ))}
+          </div>}
+          {selectedStep && <div className="simulation-hour-table">
+            <h5>India-wide synthetic state impact summary</h5>
+            <div className="simulation-hour-row simulation-state-row simulation-hour-heading"><span>State</span><span>Risk</span><span>Rain</span><span>River proxy</span><span>Heat</span></div>
+            {selectedStep.impacts.states.map((state) => (
+              <div className="simulation-hour-row simulation-state-row" key={state.state}>
+                <strong>{state.state}</strong><span>{state.riskTier} · {Math.round(state.riskScore * 100)}%</span><span>{state.rainfallMm} mm/h</span><span>{state.riverDischargeM3s} m³/s</span><span>{state.temperatureC}°C</span>
               </div>
             ))}
           </div>}

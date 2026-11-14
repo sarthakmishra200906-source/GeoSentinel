@@ -89,6 +89,14 @@ build, health check, admin UX changes, map behavior, isolation result, and the
 important limitation that live alerts, user help/chat, SOS, notifications, and
 AI were not proven as a single concurrent production cyclone workflow.
 
+### Test Result 3 documentation
+
+The full 24-hour rehearsal is documented in [test3.md](./test3.md). It adds
+36 synthetic India state summaries, three downloadable run reports, and
+`GET /api/simulation/runs/:id/report` for reconstructing persisted run evidence
+from stored timesteps. These remain synthetic and do not change the live
+operations or 10,000-user rejection boundaries.
+
 ### Already present
 
 - React/Vite frontend with an India-centered Leaflet weather map.
