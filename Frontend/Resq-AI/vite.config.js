@@ -3,6 +3,6 @@ import { defineConfig } from 'vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/GeoSentinel/',
+  base: process.env.VERCEL === '1' ? '/' : '/GeoSentinel/',
   plugins: [react()],
 })

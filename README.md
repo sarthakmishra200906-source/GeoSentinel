@@ -142,6 +142,16 @@ requires malware scanning and durable object storage before accepting untrusted 
 - `Backend/server`: Express API and MongoDB models
 - `Backend/ml_service`: FastAPI inference service scaffold
 
+## Frontend deployment paths
+
+Vite uses `/GeoSentinel/` for local development and GitHub Pages. On Vercel,
+where `VERCEL=1` is set during the build, it uses `/` so asset URLs resolve
+from the deployment domain root. Configure the Vercel project root directory
+as `Frontend/Resq-AI`, with `npm run build` and `dist` as the output directory.
+Set `VITE_API_URL` to the deployed Express API and allow the Vercel origin in
+the backend CORS configuration; the local default points to `localhost` and
+cannot serve a public deployment.
+
 ## Run locally
 
 ### Frontend
