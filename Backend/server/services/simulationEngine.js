@@ -28,12 +28,78 @@ function tier(score) {
   return 'LOW'
 }
 
+function distanceKm(start, end) {
+  const radians = (degrees) => (degrees * Math.PI) / 180
+  const latitudeDifference = radians(end.latitude - start.latitude)
+  const longitudeDifference = radians(end.longitude - start.longitude)
+  const startLatitude = radians(start.latitude)
+  const endLatitude = radians(end.latitude)
+  const rawHaversine =
+    Math.sin(latitudeDifference / 2) ** 2 +
+    Math.cos(startLatitude) * Math.cos(endLatitude) * Math.sin(longitudeDifference / 2) ** 2
+  const haversine = Math.min(1, Math.max(0, rawHaversine))
+  return 6371 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine))
+}
+
+function positionAlongRoute(routePoints, progress) {
+  const segments = routePoints.slice(1).map((point, index) => ({
+    start: routePoints[index],
+    end: point,
+    distance: distanceKm(routePoints[index], point),
+  }))
+  const totalDistance = segments.reduce((total, segment) => total + segment.distance, 0)
+  let remainingDistance = totalDistance * progress
+
+  for (const segment of segments) {
+    if (remainingDistance <= segment.distance || segment === segments[segments.length - 1]) {
+      const segmentProgress = segment.distance === 0 ? 1 : Math.min(1, remainingDistance / segment.distance)
+      if (segmentProgress >= 1) return { ...segment.end, totalDistance }
+      const radians = (degrees) => (degrees * Math.PI) / 180
+      const degrees = (value) => (value * 180) / Math.PI
+      const startLatitude = radians(segment.start.latitude)
+      const startLongitude = radians(segment.start.longitude)
+      const endLatitude = radians(segment.end.latitude)
+      const endLongitude = radians(segment.end.longitude)
+      const angularDistance = segment.distance / 6371
+      const sineDistance = Math.sin(angularDistance)
+      if (Math.abs(sineDistance) < 1e-12) {
+        return {
+          latitude: segment.start.latitude + (segment.end.latitude - segment.start.latitude) * segmentProgress,
+          longitude: segment.start.longitude + (segment.end.longitude - segment.start.longitude) * segmentProgress,
+          totalDistance,
+        }
+      }
+      const startWeight = Math.sin((1 - segmentProgress) * angularDistance) / sineDistance
+      const endWeight = Math.sin(segmentProgress * angularDistance) / sineDistance
+      const x = startWeight * Math.cos(startLatitude) * Math.cos(startLongitude) +
+        endWeight * Math.cos(endLatitude) * Math.cos(endLongitude)
+      const y = startWeight * Math.cos(startLatitude) * Math.sin(startLongitude) +
+        endWeight * Math.cos(endLatitude) * Math.sin(endLongitude)
+      const z = startWeight * Math.sin(startLatitude) + endWeight * Math.sin(endLatitude)
+      return {
+        latitude: degrees(Math.atan2(z, Math.sqrt(x * x + y * y))),
+        longitude: degrees(Math.atan2(y, x)),
+        totalDistance,
+      }
+    }
+    remainingDistance -= segment.distance
+  }
+
+  const target = routePoints[routePoints.length - 1]
+  return { latitude: target.latitude, longitude: target.longitude, totalDistance }
+}
+
 export function calculateSimulationStep(parameters, sequence, previousTimestamp) {
   const cyclone = parameters.cyclone || {}
   const rainfall = parameters.rainfall || {}
   const capacity = parameters.capacity || {}
   const hours = sequence - 1
   const approach = clamp((hours + 1) / Math.max(rainfall.durationHours || 24, 1))
+  const routePoints = cyclone.routePoints || [
+    { latitude: cyclone.startLatitude || 17.6, longitude: cyclone.startLongitude || 88.8 },
+    { latitude: cyclone.targetLatitude || 20.3, longitude: cyclone.targetLongitude || 86.6 },
+  ]
+  const routePosition = positionAlongRoute(routePoints, approach)
   const intensity = clamp((cyclone.windSpeedKmh || 120) / 220)
   const rain = clamp(((rainfall.hourlyMm || 80) / 250) * (0.65 + approach * 0.35))
   const river = clamp(rain * 0.72 + approach * 0.28)
@@ -74,11 +140,15 @@ export function calculateSimulationStep(parameters, sequence, previousTimestamp)
   return {
     timestamp,
     cyclone: {
-      distanceToOdishaKm: Number(Math.max(0, Number(cyclone.approachDistanceKm || 200) * (1 - approach)).toFixed(1)),
-      startLatitude: Number(cyclone.startLatitude || 17.6),
-      startLongitude: Number(cyclone.startLongitude || 88.8),
-      targetLatitude: Number(cyclone.targetLatitude || 20.3),
-      targetLongitude: Number(cyclone.targetLongitude || 86.6),
+      distanceToTargetKm: Number((routePosition.totalDistance * (1 - approach)).toFixed(1)),
+      distanceToOdishaKm: Number((routePosition.totalDistance * (1 - approach)).toFixed(1)),
+      startLatitude: routePoints[0].latitude,
+      startLongitude: routePoints[0].longitude,
+      targetLatitude: routePoints[routePoints.length - 1].latitude,
+      targetLongitude: routePoints[routePoints.length - 1].longitude,
+      routePoints,
+      positionLatitude: Number(routePosition.latitude.toFixed(5)),
+      positionLongitude: Number(routePosition.longitude.toFixed(5)),
       windSpeedKmh: Number(((cyclone.windSpeedKmh || 120) * (0.7 + approach * 0.3)).toFixed(1)),
       approachProgress: Number(approach.toFixed(4)),
     },

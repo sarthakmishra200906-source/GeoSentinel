@@ -29,8 +29,9 @@ The foundation phase has started:
 - Added explicit `simulationMode` response markers.
 
 Still not implemented: WebSocket/SSE streaming, public live-vs-simulation
-context middleware, resource locking, server-generated PDF/object storage,
-historical calibration, and ML review flow. The time-step engine, persisted
+context middleware, resource locking, production object storage, historical
+calibration, and ML review flow. Server-generated PDFs are now archived in
+MongoDB with a document-size cap; this is not object storage. The time-step engine, persisted
 timestep collection, insights, national synthetic context, browser downloads,
 saved-run history, and admin report reconstruction are implemented. Do not add
 missing surfaces by bypassing the models and audit boundary above.
@@ -1013,3 +1014,59 @@ Until these inputs are supplied, the safe defaults are: existing hubs only,
 print plus CSV/JSON, GDACS plus IMD/RSMC reconciliation, proxy scores labeled
 non-operational, human approval for every public alert, and private cloud
 staging rather than public emergency deployment.
+
+## Latest implementation checkpoint — 2026-11-15
+
+The local admin rehearsal now supports custom global waypoint tracks, while
+its detailed impact engine remains an Odisha-only synthetic model. Saved runs
+are owner-scoped and cursor-paginated (50 at a time); loading a run returns up
+to 168 timesteps. Completion generates a PDF evidence report stored in MongoDB
+with SHA-256 metadata, subject to a 12 MiB document limit. This storage is not
+a replacement for production object storage, retention policy, or backups.
+
+The admin `Live cyclone map` navigation renders the same live-map component as
+the user map. It is separate from the simulation route and does not receive
+synthetic tracks. During the latest shared-browser check the GDACS feed
+reported unavailable, so live event ingestion was not verified. An empty map
+under provider failure is not proof of no cyclone.
+
+The currently selected simulation run ID is stored in the browser tab's
+`sessionStorage`. When the Simulation workspace remounts after visiting Live
+cyclone map or Operations, it reloads that run and its stored timesteps and
+reports. The run remains step-driven; it does not advance while another view
+is open.
+
+### Latest verification
+
+- Backend: `npm test` — 22 passed, 0 failed.
+- Frontend: `npm run build` passed; Vite reports a >500 kB chunk advisory.
+- Frontend: `npm run lint` passed with five warnings and no errors.
+- Shared browser: completed three separately named two-hour synthetic runs.
+  The latest run displayed 30 district rows, 36 synthetic state rows, HIGH
+  59% peak risk at hour 2, and one stored PDF with a working in-page preview.
+  The saved-run selector listed it alongside the earlier HIGH 71% run and its
+  stored PDF.
+- During the latest run at synthetic hour 1, Operations displayed the existing
+  Help request, the Help form opened without submission, and Live cyclone map
+  remained free of the synthetic track. The run then completed at hour 2.
+- Navigation regression check: run `6af953d32ac7886fc72e0f01` was restored at
+  `RUNNING`, hour 1, after visiting both Live cyclone map and
+  Operations/Broadcast Emergency Notification. It was then advanced to hour 2
+  and archived rather than left active.
+- Grounded chat returned a cited `GROUNDED` answer from the approved
+  government document. This question was asked outside an active run. Repeated
+  document/page citations were deduplicated in the UI after duplicate React
+  keys were observed.
+- The rescue-center layer accurately reported zero open/limited entries;
+  populated marker rendering could not be verified without real records.
+- `git diff --check` passed.
+- Not verified: GDACS live event delivery, native PDF download completion,
+  active-run RAG interaction, populated rescue-center markers, stable
+  OpenStreetMap tile loading during view changes, report pagination against
+  more than 50 records, concurrent step races, multiuser/load behavior,
+  production storage/backup, actual notifications/SOS, or operational cyclone
+  readiness.
+
+See [test4.md](./test4.md), [sarthak.md](./sarthak.md), and
+[simulation_test_plan.md](./simulation_test_plan.md). These local results are
+not production acceptance.

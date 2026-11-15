@@ -17,11 +17,17 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointEleme
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
-export default function AdminDashboard({ token, activeSection = 'overview', onSwitchToMap }) {
+export default function AdminDashboard({ token, activeSection = 'overview' }) {
   const [guidelines, setGuidelines] = useState([])
   const [verifications, setVerifications] = useState([])
   const [message, setMessage] = useState('')
   const [centers, setCenters] = useState([])
+  const [helpReports, setHelpReports] = useState([])
+  const [helpReportsCursor, setHelpReportsCursor] = useState(null)
+  const [hasMoreHelpReports, setHasMoreHelpReports] = useState(false)
+  const [loadingOlderHelpReports, setLoadingOlderHelpReports] = useState(false)
+  const [helpImagePreview, setHelpImagePreview] = useState(null)
+  const [loadingHelpImageId, setLoadingHelpImageId] = useState('')
   const [auditEvents, setAuditEvents] = useState([])
   const [auditFilter, setAuditFilter] = useState('all')
   const [auditSearch, setAuditSearch] = useState('')
@@ -61,21 +67,26 @@ export default function AdminDashboard({ token, activeSection = 'overview', onSw
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token])
   const load = useCallback(async () => {
-    const [guidelineResponse, verificationResponse, centersResponse, auditResponse, healthResponse, weatherResponse, stateResponse] =
+    const [guidelineResponse, verificationResponse, centersResponse, reportsResponse, auditResponse, healthResponse, weatherResponse, stateResponse] =
       await Promise.all([
         fetch(`${API_URL}/admin/guidelines`, { headers }),
         fetch(`${API_URL}/admin/verifications`, { headers }),
         fetch(`${API_URL}/rescue-centers`, { headers }),
+        fetch(`${API_URL}/reports?limit=50`, { headers }),
         fetch(`${API_URL}/admin/audit`, { headers }),
         fetch(`${API_URL}/admin/health`, { headers }),
         fetch(`${API_URL}/weather/dashboard`),
         fetch(`${API_URL}/weather/states`),
       ])
-    if (!guidelineResponse.ok || !verificationResponse.ok || !auditResponse.ok)
+    if (!guidelineResponse.ok || !verificationResponse.ok || !reportsResponse.ok || !auditResponse.ok)
       throw new Error('Unable to load admin data')
     setGuidelines(await guidelineResponse.json())
     setVerifications(await verificationResponse.json())
     setCenters(await centersResponse.json())
+    const reportData = await reportsResponse.json()
+    setHelpReports(Array.isArray(reportData) ? reportData : reportData.reports)
+    setHelpReportsCursor(Array.isArray(reportData) ? null : reportData.nextCursor)
+    setHasMoreHelpReports(Array.isArray(reportData) ? false : Boolean(reportData.hasMore))
     setAuditEvents(await auditResponse.json())
     setHealth(healthResponse.ok ? await healthResponse.json() : null)
     setWeatherDashboard(weatherResponse.ok ? await weatherResponse.json() : null)
@@ -220,6 +231,42 @@ export default function AdminDashboard({ token, activeSection = 'overview', onSw
     }
   }, [load])
 
+  useEffect(() => () => {
+    if (helpImagePreview?.url) URL.revokeObjectURL(helpImagePreview.url)
+  }, [helpImagePreview])
+
+  const loadOlderHelpReports = async () => {
+    if (!helpReportsCursor || loadingOlderHelpReports) return
+    setLoadingOlderHelpReports(true)
+    try {
+      const response = await fetch(
+        `${API_URL}/reports?limit=50&cursor=${encodeURIComponent(helpReportsCursor)}`,
+        { headers },
+      )
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to load older help requests')
+      setHelpReports((current) => [...current, ...data.reports])
+      setHelpReportsCursor(data.nextCursor)
+      setHasMoreHelpReports(Boolean(data.hasMore))
+    } finally {
+      setLoadingOlderHelpReports(false)
+    }
+  }
+
+  const viewHelpImage = async (report) => {
+    setLoadingHelpImageId(report._id)
+    try {
+      const response = await fetch(`${API_URL}/reports/${report._id}/image`, { headers })
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Unable to load help request image')
+      }
+      setHelpImagePreview({ reportId: report._id, url: URL.createObjectURL(await response.blob()) })
+    } finally {
+      setLoadingHelpImageId('')
+    }
+  }
+
   const upload = async (event) => {
     event.preventDefault()
     const body = new FormData()
@@ -342,9 +389,6 @@ export default function AdminDashboard({ token, activeSection = 'overview', onSw
           <h2>Admin dashboard</h2>
           <p>Manage verified content, rescue centers, notifications, and system health.</p>
         </div>
-        <button type="button" className="btn-switch-map" onClick={onSwitchToMap}>
-          🗺️ Open map
-        </button>
       </div>
       {activeSection === 'overview' && <div className="admin-view-panel" id="admin-overview"><h3>System Health</h3>
       <p>
@@ -696,6 +740,54 @@ export default function AdminDashboard({ token, activeSection = 'overview', onSw
           </button>
         </p>
       ))}
+      {centers.length === 0 && <p>No open or limited rescue centers are recorded yet.</p>}
+      <section className="admin-help-requests" aria-labelledby="admin-help-requests-title">
+        <h3 id="admin-help-requests-title">Help requests ({helpReports.length}{hasMoreHelpReports ? '+' : ''})</h3>
+        <p>Reports submitted through the Help box. Simulation runs do not create help requests.</p>
+        {helpReports.length === 0
+          ? <p>No help requests are recorded.</p>
+          : helpReports.map((report) => {
+            const [longitude, latitude] = report.location?.coordinates || []
+            return (
+              <article className="admin-help-report" key={report._id}>
+                <div className="admin-help-report-heading">
+                  <strong>{report.reporterName} · {report.status}</strong>
+                  <time dateTime={report.createdAt}>{new Date(report.createdAt).toLocaleString()}</time>
+                </div>
+                <p><strong>Address:</strong> {report.reporterAddress}</p>
+                <p><strong>Request:</strong> {report.description}</p>
+                <p>
+                  <strong>Location:</strong> {Number.isFinite(latitude) && Number.isFinite(longitude)
+                    ? `${latitude}, ${longitude}`
+                    : 'Unavailable'}
+                  {Number.isFinite(latitude) && Number.isFinite(longitude) && (
+                    <> · <a href={`https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=13/${latitude}/${longitude}`} target="_blank" rel="noreferrer">Open street map</a></>
+                  )}
+                </p>
+                {report.imageMetadata?.originalName && (
+                  <p>
+                    Attachment: {report.imageMetadata.originalName}
+                    <button
+                      type="button"
+                      disabled={loadingHelpImageId === report._id}
+                      onClick={() => viewHelpImage(report).catch((error) => setMessage(error.message))}
+                    >
+                      {loadingHelpImageId === report._id ? 'Loading image…' : 'View image'}
+                    </button>
+                  </p>
+                )}
+                {helpImagePreview?.reportId === report._id && (
+                  <img className="admin-help-report-image" src={helpImagePreview.url} alt={`Attachment for ${report.reporterName}'s help request`} />
+                )}
+              </article>
+            )
+          })}
+        {hasMoreHelpReports && (
+          <button type="button" disabled={loadingOlderHelpReports} onClick={() => loadOlderHelpReports().catch((error) => setMessage(error.message))}>
+            {loadingOlderHelpReports ? 'Loading…' : 'Load older help requests'}
+          </button>
+        )}
+      </section>
       </>}
 
       {activeSection === 'guidelines' && <>

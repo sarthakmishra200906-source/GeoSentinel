@@ -52,12 +52,15 @@ export default class App extends Component {
           onNavigate={this.handleNavigate}
         />
         {isAdminView ? (
-          <AdminDashboard
-            token={this.state.token}
-            activeSection={this.state.adminSection}
-            onSectionChange={(adminSection) => this.setState({ adminSection })}
-            onSwitchToMap={() => this.handleNavigate('map')}
-          />
+          this.state.adminSection === 'live-map' ? (
+            <MapContainer />
+          ) : (
+            <AdminDashboard
+              token={this.state.token}
+              activeSection={this.state.adminSection}
+              onSectionChange={(adminSection) => this.setState({ adminSection })}
+            />
+          )
         ) : (
           <MapContainer />
         )}

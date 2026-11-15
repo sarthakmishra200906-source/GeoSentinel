@@ -8,6 +8,45 @@ has been implemented for local admin rehearsal, but the incomplete production
 surfaces listed below must not be added by bypassing its models, provenance,
 authorization, or audit boundary.
 
+### Implemented local slice (2026-11-15)
+
+- Admin scenarios accept 2–20 global waypoints. The synthetic track follows
+  segment-by-segment great-circle interpolation, including date-line crossings.
+- Detailed impact calculations are still Odisha-only synthetic district
+  results, with a separate synthetic state-context table. A global track does
+  not make the impact model global or physically calibrated.
+- Run history is owner-scoped and cursor-paginated (50 per page); a run load
+  returns up to 168 stored hourly timesteps.
+- Completed runs automatically generate a PDF containing recorded district and
+  state evidence. PDF bytes and SHA-256 metadata are stored in MongoDB, capped
+  at 12 MiB per document. This is not object storage, a digital signature, or
+  tamper-evident archival.
+- The simulation map reads open/limited rescue-center records for
+  reference-only markers and does not change center status or occupancy. The
+  latest local registry returned zero eligible centers; populated marker
+  rendering remains unverified.
+- The browser tab remembers the selected run ID and restores the run, stored
+  timesteps, and reports when Simulation is reopened after another admin view.
+  Time remains manually step-driven while away; navigation does not advance it.
+- Admin Operations has a Help requests inbox. A local cross-view rehearsal
+  opened it and the Help form while a synthetic run was active without
+  submitting a new report.
+- Admin `Live cyclone map` and the user map share the normal live map component.
+  Synthetic simulation tracks are not passed to either map. GDACS provider
+  failure is distinct from a successful empty result; an unavailable feed
+  means live cyclone presence is unverified.
+- Local automated tests pass (22 backend tests), and three two-hour admin UI
+  rehearsals completed with per-run stored PDF previews. A navigation check
+  confirmed an hour-1 run restores after opening Live cyclone map and
+  Operations. Grounded chat returned
+  citations from an approved document, but it was not exercised during an
+  active run. See [test4.md](./test4.md) for results and remaining gaps.
+
+This status update does not mark the broader design below as implemented.
+Multi-admin streaming, resource allocation, object-storage retention,
+calibrated all-India impacts, failure/load tests, and operational approvals
+remain deployment gates.
+
 The simulator is a controlled rehearsal and decision-support system. It is not
 an official forecast, evacuation order, autonomous dispatch system, or
 replacement for disaster-management authorities.
@@ -504,6 +543,13 @@ Completed runs support authenticated PDF, CSV, and JSON exports containing:
 
 - Prove no simulation action creates or modifies live records or sends
   external notifications.
+- During an active run, confirm the normal Live cyclone map excludes the
+  synthetic track and the Help inbox gains no synthetic request.
+- Confirm grounded chat remains restricted to approved official documents; do
+  not treat a query outside a running simulation as proof of simultaneous
+  workflow behavior.
+- Confirm the rescue-center overlay reflects only eligible registry records,
+  displays a truthful empty state, and never mutates inventory during replay.
 - Prove non-admin and unauthorized collaborators cannot read or mutate runs.
 - Prove the simulation header cannot be forged into another run.
 

@@ -1,14 +1,87 @@
 import { Router } from 'express'
 import crypto from 'node:crypto'
+import mongoose from 'mongoose'
 import SimulationScenario from '../models/SimulationScenario.js'
 import SimulationRun from '../models/SimulationRun.js'
 import SimulationTimestep from '../models/SimulationTimestep.js'
+import SimulationReport from '../models/SimulationReport.js'
 import { requireAdmin } from '../middleware/admin.js'
 import { recordAuditEvent } from '../services/audit.js'
 import { validateSimulationName, validateSimulationParameters } from '../services/simulationValidation.js'
 import { calculateSimulationStep } from '../services/simulationEngine.js'
+import { buildSimulationPdf, createSimulationReportSummary } from '../services/simulationPdfReport.js'
 
 const router = Router()
+const RUN_PAGE_SIZE = 50
+const MAX_PDF_BYTES = 12 * 1024 * 1024
+
+function encodeRunCursor(run) {
+  return Buffer.from(JSON.stringify({ createdAt: run.createdAt, id: run._id }), 'utf8').toString('base64url')
+}
+
+function reportMetadata(report) {
+  const metadata = report.toObject()
+  delete metadata.pdf
+  return metadata
+}
+
+function decodeRunCursor(cursor) {
+  if (!cursor) return null
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'))
+    const createdAt = new Date(parsed.createdAt)
+    if (!mongoose.Types.ObjectId.isValid(parsed.id) || !Number.isFinite(createdAt.getTime())) return null
+    return { createdAt, id: parsed.id }
+  } catch {
+    return null
+  }
+}
+
+async function storeCompletePdf(run, timesteps, owner, request) {
+  const generatedAt = new Date()
+  const pdf = await buildSimulationPdf({
+    run,
+    scenario: run.scenario,
+    timesteps,
+    generatedAt,
+  })
+  if (pdf.length > MAX_PDF_BYTES) {
+    const error = new Error('Generated PDF exceeds the MongoDB document storage limit; export is not stored')
+    error.statusCode = 413
+    throw error
+  }
+  const fileName = `${run._id}-complete-evidence-${generatedAt.toISOString().replace(/[:.]/g, '-')}.pdf`
+  const report = await SimulationReport.create({
+    runId: run._id,
+    owner,
+    reportType: 'complete_simulation_pdf',
+    fileName,
+    sha256: crypto.createHash('sha256').update(pdf).digest('hex'),
+    generatedAt,
+    summary: createSimulationReportSummary(timesteps),
+    pdf,
+  })
+  let auditError = null
+  try {
+    await recordAuditEvent({
+      request,
+      actor: owner,
+      action: 'simulation.report.created',
+      targetType: 'SimulationReport',
+      targetId: report._id,
+      changes: {
+        runId: run._id,
+        fileName,
+        sha256: report.sha256,
+        timestepCount: timesteps.length,
+      },
+    })
+  } catch (error) {
+    console.error({ requestId: request.id, error })
+    auditError = 'PDF was stored, but its audit event could not be recorded.'
+  }
+  return { report, auditError }
+}
 
 router.post('/scenarios', ...requireAdmin, async (request, response, next) => {
   try {
@@ -81,14 +154,39 @@ router.post('/runs', ...requireAdmin, async (request, response, next) => {
 
 router.get('/runs', ...requireAdmin, async (request, response, next) => {
   try {
-    const runs = await SimulationRun.find({
+    const ownerFilter = {
       $or: [{ owner: request.user._id }, { collaborators: request.user._id }],
-    })
-      .sort({ createdAt: -1 })
-      .limit(50)
+    }
+    const cursor = decodeRunCursor(request.query.cursor)
+    if (request.query.cursor && !cursor) {
+      response.status(400).json({ error: 'Invalid simulation run cursor' })
+      return
+    }
+    const query = cursor
+      ? {
+          $and: [
+            ownerFilter,
+            {
+              $or: [
+                { createdAt: { $lt: cursor.createdAt } },
+                { createdAt: cursor.createdAt, _id: { $lt: cursor.id } },
+              ],
+            },
+          ],
+        }
+      : ownerFilter
+    const results = await SimulationRun.find(query)
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(RUN_PAGE_SIZE + 1)
       .populate('scenario', 'name parameters')
       .lean()
-    response.json(runs.map((run) => ({ ...run, simulationMode: true })))
+    const hasMore = results.length > RUN_PAGE_SIZE
+    const runs = results.slice(0, RUN_PAGE_SIZE)
+    response.json({
+      runs: runs.map((run) => ({ ...run, simulationMode: true })),
+      nextCursor: hasMore ? encodeRunCursor(runs[runs.length - 1]) : null,
+      hasMore,
+    })
   } catch (error) {
     next(error)
   }
@@ -104,7 +202,7 @@ router.get('/runs/:id', ...requireAdmin, async (request, response, next) => {
       response.status(404).json({ error: 'Simulation run not found' })
       return
     }
-    const timesteps = await SimulationTimestep.find({ runId: run._id }).sort({ sequence: -1 }).limit(72).lean()
+    const timesteps = await SimulationTimestep.find({ runId: run._id }).sort({ sequence: -1 }).limit(168).lean()
     response.json({ run, timesteps: timesteps.reverse(), simulationMode: true })
   } catch (error) {
     next(error)
@@ -141,15 +239,98 @@ router.get('/runs/:id/report', ...requireAdmin, async (request, response, next) 
   }
 })
 
+router.get('/runs/:id/reports', ...requireAdmin, async (request, response, next) => {
+  try {
+    const run = await SimulationRun.findOne({
+      _id: request.params.id,
+      $or: [{ owner: request.user._id }, { collaborators: request.user._id }],
+    }).select('_id')
+    if (!run) {
+      response.status(404).json({ error: 'Simulation run not found' })
+      return
+    }
+    const reports = await SimulationReport.find({ runId: run._id })
+      .sort({ createdAt: -1 })
+      .lean()
+    response.json(reports)
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.post('/runs/:id/reports', ...requireAdmin, async (request, response, next) => {
+  try {
+    const run = await SimulationRun.findOne({
+      _id: request.params.id,
+      $or: [{ owner: request.user._id }, { collaborators: request.user._id }],
+    }).populate('scenario')
+    if (!run) {
+      response.status(404).json({ error: 'Simulation run not found' })
+      return
+    }
+    const timesteps = await SimulationTimestep.find({ runId: run._id }).sort({ sequence: 1 }).lean()
+    if (!timesteps.length) {
+      response.status(409).json({ error: 'Advance the simulation before creating its PDF report' })
+      return
+    }
+    const { report, auditError } = await storeCompletePdf(run, timesteps, request.user._id, request)
+    response.status(auditError ? 503 : 201).json({
+      ...reportMetadata(report),
+      ...(auditError ? { error: auditError } : {}),
+      auditError,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/runs/:id/reports/:reportId/pdf', ...requireAdmin, async (request, response, next) => {
+  try {
+    const run = await SimulationRun.findOne({
+      _id: request.params.id,
+      $or: [{ owner: request.user._id }, { collaborators: request.user._id }],
+    }).select('_id')
+    if (!run) {
+      response.status(404).json({ error: 'Simulation run not found' })
+      return
+    }
+    const report = await SimulationReport.findOne({
+      _id: request.params.reportId,
+      runId: run._id,
+    }).select('+pdf')
+    if (!report) {
+      response.status(404).json({ error: 'Stored simulation PDF not found' })
+      return
+    }
+    const disposition = request.query.download === '1' ? 'attachment' : 'inline'
+    response
+      .type('application/pdf')
+      .set('Content-Disposition', `${disposition}; filename="${report.fileName}"`)
+      .set('X-Report-SHA256', report.sha256)
+      .send(report.pdf)
+  } catch (error) {
+    next(error)
+  }
+})
+
 router.post('/runs/:id/step', ...requireAdmin, async (request, response, next) => {
   try {
     const run = await SimulationRun.findOne({
       _id: request.params.id,
       owner: request.user._id,
-      status: { $in: ['READY', 'RUNNING', 'PAUSED', 'LAGGING'] },
+      status: { $in: ['READY', 'RUNNING', 'PAUSED', 'LAGGING', 'COMPLETED'] },
     }).populate('scenario')
     if (!run) {
       response.status(404).json({ error: 'Steppable simulation run not found' })
+      return
+    }
+    if (run.status === 'COMPLETED') {
+      response.status(409).json({ error: 'Simulation is already complete' })
+      return
+    }
+    const durationHours = run.scenario.parameters.rainfall?.durationHours ?? 24
+    if (run.sequence >= durationHours) {
+      response.status(409).json({ error: 'Simulation reached its configured duration and is complete' })
       return
     }
     const timestep = calculateSimulationStep(run.scenario.parameters, run.sequence + 1, run.simulationTime)
@@ -166,7 +347,7 @@ router.post('/runs/:id/step', ...requireAdmin, async (request, response, next) =
     })
     run.sequence = created.sequence
     run.simulationTime = created.timestamp
-    run.status = 'RUNNING'
+    run.status = created.sequence >= durationHours ? 'COMPLETED' : 'RUNNING'
     run.ownerHeartbeatAt = new Date()
     await run.save()
     await recordAuditEvent({
@@ -177,8 +358,33 @@ router.post('/runs/:id/step', ...requireAdmin, async (request, response, next) =
       targetId: run._id,
       changes: { sequence: created.sequence, riskTier: created.impacts.riskTier, dataSource: 'synthetic_simulation' },
     })
-    response.json({ run, timestep: created, simulationMode: true })
+    let storedReport = null
+    let reportError = null
+    if (run.status === 'COMPLETED') {
+      try {
+        const timesteps = await SimulationTimestep.find({ runId: run._id }).sort({ sequence: 1 }).lean()
+        const reportResult = await storeCompletePdf(run, timesteps, request.user._id, request)
+        storedReport = reportResult.report
+        reportError = reportResult.auditError
+      } catch (error) {
+        console.error({ requestId: request.id, error })
+        reportError = error.statusCode === 413
+          ? error.message
+          : 'Simulation completed, but its PDF could not be archived. Retry from the saved-run report controls.'
+      }
+    }
+    response.json({
+      run,
+      timestep: created,
+      simulationMode: true,
+      storedReport: storedReport ? reportMetadata(storedReport) : null,
+      reportError,
+    })
   } catch (error) {
+    if (error.code === 11000) {
+      response.status(409).json({ error: 'Another request already advanced this run; reload the run before stepping again' })
+      return
+    }
     next(error)
   }
 })

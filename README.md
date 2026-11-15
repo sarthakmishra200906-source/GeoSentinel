@@ -22,8 +22,10 @@ Read these before changing the project:
 - [simulation_test_plan.md](./simulation_test_plan.md): authoritative simulator
   scope and isolation design.
 - [test3.md](./test3.md): latest full 24-hour simulation test.
-- [sarthak.md](./sarthak.md): current admin visibility, saved runs, and map
-  separation.
+- [test4.md](./test4.md): latest two-hour UI cyclone rehearsal and responsive
+  navigation verification.
+- [sarthak.md](./sarthak.md): current admin workflow, saved runs, stored PDFs,
+  route limits, and live-map separation.
 - [help.md](./help.md): startup and manual verification checklist.
 
 Do not treat synthetic simulation data as live weather or an official forecast.
@@ -58,6 +60,15 @@ when behavior changes.
 - Added server-side OpenWeather tile proxying and regional weather point readings.
 - Cyclone overlays use current GDACS tropical-cyclone events only. If the live
   provider is unavailable or has no active/forming events, no cyclone is shown.
+  The API distinguishes `unavailable` from `no_current_events`; a blank map
+  during provider failure does not prove that no cyclone exists.
+- Admin simulation supports custom 2–20 waypoint global routes with
+  date-line-aware interpolation. Only the track is global: impacts remain
+  Odisha-district synthetic proxies plus synthetic state context.
+- Completed simulation runs automatically archive a server-generated PDF in
+  MongoDB, with a SHA-256 digest and inline preview/download endpoints. MongoDB
+  document storage is capped at 12 MiB per PDF; this is not object storage or
+  a digital signature.
 - Added Express-to-FastAPI flood prediction proxying with Open-Meteo weather and
   Global Flood telemetry, explicit dry-run simulation mode, cached basic safety
   answers, admin health checks, and user notifications.
@@ -68,6 +79,15 @@ when behavior changes.
 - Scrollable responsive cards for guidelines, help requests, login, registration, and
   the authenticated AI assistant.
 - Weather map controls with temperature, rain, wind, cloud, and cyclone layers.
+- An admin Live cyclone map navigation item that uses the same live map
+  component as the user view; simulated tracks are never injected into it.
+- Admin Operations includes a paged Help requests inbox; simulation runs do
+  not create citizen reports or mutate rescue-center records.
+- Simulation restores the last selected run when returning from another
+  admin view. Its synthetic clock advances only when an admin presses **Step**.
+- Simulation maps can show reference-only open/limited rescue-center records
+  from the live registry; an empty registry is shown as empty, not filled with
+  demo records.
 - Current-location map control and editable location fields in the Help box.
 
 ## Environment configuration
@@ -160,19 +180,27 @@ Authentication endpoints:
 - `GET /api/weather/states` for state danger summaries and coverage status
 - `GET /api/weather/trends?state=Odisha` for 12-month weather and discharge trends
 - `GET /api/weather/tiles/:layer/:z/:x/:y.png` for proxied weather tiles
-- `GET /api/weather/storms` for live GDACS cyclone events (empty when unavailable)
+- `GET /api/weather/storms` for current GDACS cyclone events; inspect `status`
+  and `available` to distinguish no events from a provider outage
 - `POST /api/prediction` with `{ "latitude": 28.6, "longitude": 77.2 }`;
   responses separate rain outlook from active flood risk and identify proxy
   calibration, source, timestamp, and warnings
 - `POST /api/prediction/simulate` for admins; always returns `SIMULATED`
 - `GET /api/notifications` for authenticated users
 - `POST /api/notifications` for admins
+- `GET /api/reports?limit=50` for the first admin help-report page; pass the
+  returned `nextCursor` as `cursor` to load the next page
+- `GET /api/reports/:id/image` for an authorized admin image preview
 - `POST /api/simulation/scenarios` for admins
 - `GET /api/simulation/scenarios` for admins
 - `POST /api/simulation/runs` for admins
 - `GET /api/simulation/runs` for admins
 - `GET /api/simulation/runs/:id` for admins
 - `GET /api/simulation/runs/:id/report` for admins
+- `GET /api/simulation/runs/:id/reports` to list archived PDF metadata
+- `POST /api/simulation/runs/:id/reports` to store a PDF from recorded hours
+- `GET /api/simulation/runs/:id/reports/:reportId/pdf` to preview a stored PDF;
+  pass `?download=1` for attachment disposition
 - `POST /api/simulation/runs/:id/step` for admins
 - `POST /api/simulation/runs/:id/pause` for admins
 - `POST /api/simulation/runs/:id/heartbeat` for admins

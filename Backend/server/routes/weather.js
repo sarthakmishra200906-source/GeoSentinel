@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { assessTelemetry } from '../services/riskAssessment.js'
+import cycloneFeed from '../services/cycloneFeed.js'
 
 const router = Router()
 const hubs = [
@@ -577,99 +578,11 @@ router.get('/trends', async (request, response, next) => {
   }
 })
 
-const INDIA_CYCLONE_BOUNDS = { minLat: -5, maxLat: 35, minLon: 55, maxLon: 105 }
-
-const isCurrentIndiaRegionEvent = (feature, now = Date.now()) => {
-  const props = feature.properties || {}
-  const startsAt = Date.parse(props.fromdate || props.fromDate || '')
-  const endsAt = Date.parse(props.todate || props.toDate || '')
-  if (!Number.isFinite(startsAt) || !Number.isFinite(endsAt) || endsAt < now || startsAt > now + 7 * 24 * 60 * 60 * 1000) {
-    return false
-  }
-  const coords = feature.geometry?.coordinates
-  const latitude = Number(coords?.[1])
-  const longitude = Number(coords?.[0])
-  const country = String(props.country || '').toLowerCase()
-  return (
-    country.includes('india') ||
-    (Number.isFinite(latitude) &&
-      Number.isFinite(longitude) &&
-      latitude >= INDIA_CYCLONE_BOUNDS.minLat &&
-      latitude <= INDIA_CYCLONE_BOUNDS.maxLat &&
-      longitude >= INDIA_CYCLONE_BOUNDS.minLon &&
-      longitude <= INDIA_CYCLONE_BOUNDS.maxLon)
-  )
-}
-
-let cachedGdacsTracks = null
-let lastGdacsFetch = 0
-
-async function fetchLiveGlobalCyclones() {
-  if (cachedGdacsTracks && Date.now() - lastGdacsFetch < 10 * 60 * 1000) {
-    return cachedGdacsTracks
-  }
-
+router.get('/storms', async (_request, response, next) => {
   try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 1200)
-    const res = await fetch('https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH?eventlist=TC', {
-      signal: controller.signal,
-      headers: { 'Accept': 'application/json' },
-    })
-    clearTimeout(timer)
-
-    if (res.ok) {
-      const data = await res.json()
-      const features = data?.features || []
-      if (features.length > 0) {
-        const liveTracks = features
-          .filter((feature) => isCurrentIndiaRegionEvent(feature))
-          .slice(0, 10)
-          .map((f, idx) => {
-          const props = f.properties || {}
-          const coords = f.geometry?.coordinates
-          const point = Array.isArray(coords) && typeof coords[0] === 'number' ? [Number(coords[1]), Number(coords[0])] : null
-          if (!point || !Number.isFinite(point[0]) || !Number.isFinite(point[1])) return null
-          const name = props.name || props.eventname || `Tropical Cyclone ${idx + 1}`
-          const wind = Number(props.severitydata?.severity)
-
-          return {
-            id: `gdacs-tc-${props.eventid || idx}`,
-            name: name.startsWith('🌀') ? name : `🌀 ${name}`,
-            category: props.alertlevel ? `${props.alertlevel} Alert Cyclone` : 'Tropical Cyclone',
-            ...(Number.isFinite(wind) ? { maxWindKmh: Math.round(wind) } : {}),
-            status: 'ACTIVE_LIVE_GDACS',
-            basin: props.country || 'Global Oceans',
-            coordinates: [point],
-            source: 'GDACS',
-            validFrom: props.fromdate || null,
-            validUntil: props.todate || null,
-          }
-          })
-          .filter(Boolean)
-
-        if (liveTracks.length > 0) {
-          cachedGdacsTracks = liveTracks
-          lastGdacsFetch = Date.now()
-          return liveTracks
-        }
-      }
-    }
-  } catch {
-    // Do not substitute stale or simulated tracks for unavailable live data.
-  }
-
-  cachedGdacsTracks = []
-  lastGdacsFetch = Date.now()
-  return []
-}
-
-router.get('/storms', async (_request, response) => {
-  try {
-    const liveTracks = await fetchLiveGlobalCyclones()
-    response.json({ tracks: liveTracks, count: liveTracks.length, live: true })
+    response.json(await cycloneFeed.getCurrentEvents())
   } catch (error) {
-    response.status(500).json({ error: error.message || 'Error loading storm tracks' })
+    next(error)
   }
 })
 

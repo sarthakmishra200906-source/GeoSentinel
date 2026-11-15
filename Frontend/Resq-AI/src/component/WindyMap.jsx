@@ -64,18 +64,16 @@ export default function WindyMap({ onSwitchToMap }) {
   const fetchStorms = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/weather/storms`)
-      if (res.ok) {
-        const data = await res.json()
-        const tracks = data.live === true && Array.isArray(data.tracks) ? data.tracks : []
-        setStorms(tracks)
-        postToIframe({
-          type: 'update-cyclones',
-          storms: tracks,
-          enabled: showCyclones,
-        })
-      }
-    } catch (err) {
-      console.warn('Unable to load cyclone data:', err)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Unable to load cyclone data')
+      if (data.available !== true) throw new Error(data.error || 'Live cyclone feed is unavailable')
+      const tracks = Array.isArray(data.tracks) ? data.tracks : []
+      setStorms(tracks)
+      postToIframe({ type: 'update-cyclones', storms: tracks, enabled: showCyclones })
+    } catch (error) {
+      setStorms([])
+      postToIframe({ type: 'update-cyclones', storms: [], enabled: showCyclones })
+      console.warn('Unable to load cyclone data:', error)
     }
   }, [postToIframe, showCyclones])
 
@@ -184,8 +182,13 @@ export default function WindyMap({ onSwitchToMap }) {
   // ── On mount, load storms & radar url ──────────────────────────────────────
   useEffect(() => {
     fetchStorms()
+    const intervalId = window.setInterval(fetchStorms, 60 * 1000)
+    return () => window.clearInterval(intervalId)
+  }, [fetchStorms])
+
+  useEffect(() => {
     fetchRadarUrl()
-  }, [fetchStorms, fetchRadarUrl])
+  }, [fetchRadarUrl])
 
   // ── Listen for Windy iframe events ─────────────────────────────────────────
   useEffect(() => {
@@ -292,7 +295,6 @@ export default function WindyMap({ onSwitchToMap }) {
         >
           🌀 Cyclones ({storms.length})
         </button>
-
         {/* Cyclone Quick-Focus selector */}
         {storms.length > 0 && showCyclones && (
           <select

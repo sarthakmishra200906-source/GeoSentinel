@@ -173,6 +173,7 @@ export default class Navbar extends Component {
                         ['operations', 'Operations'],
                         ['guidelines', 'Guidelines & upload'],
                         ['audit', 'Audit log'],
+                        ['live-map', 'Live cyclone map'],
                       ].map(([section, label]) => (
                         <button
                           key={section}
@@ -184,9 +185,6 @@ export default class Navbar extends Component {
                         </button>
                       ))}
                     </div>
-                    <button className="menu-item" type="button" onClick={() => this.props.onNavigate('map')}>
-                      Map
-                    </button>
                   </>
                 )}
                 <button className="menu-item" type="button" onClick={() => this.openCard('ai')}>
@@ -356,6 +354,12 @@ class AiPanel extends Component {
   }
 
   render() {
+    const sources = [...new Map(
+      (this.state.response?.sources || []).map((source) => [
+        `${source.documentId}-${source.page ?? source.section ?? source.officialUrl}`,
+        source,
+      ]),
+    ).values()]
     return (
       <form className="auth-form" onSubmit={this.submit}>
         <p>Ask a question. Answers are generated only from approved government guidance; contact local emergency services for immediate danger.</p>
@@ -374,10 +378,10 @@ class AiPanel extends Component {
           <div className={this.state.response.status === 'GROUNDED' ? 'form-success' : 'form-error'} role="status">
             <strong>{this.state.response.status}</strong>
             <p>{this.state.response.answer || this.state.response.warnings?.[0] || 'No supported answer is available.'}</p>
-            {this.state.response.sources?.length > 0 && (
+            {sources.length > 0 && (
               <ul>
-                {this.state.response.sources.map((source) => (
-                  <li key={`${source.documentId}-${source.page || source.section}`}>
+                {sources.map((source) => (
+                  <li key={`${source.documentId}-${source.page ?? source.section ?? source.officialUrl}`}>
                     <a href={source.officialUrl} target="_blank" rel="noreferrer">{source.title}</a>
                     {source.page ? `, page ${source.page}` : ''}
                   </li>

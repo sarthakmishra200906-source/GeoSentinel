@@ -59,9 +59,11 @@
   position: fixed;
   top: 16px;
   right: 16px;
+  left: 240px;
   z-index: 1200;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
   pointer-events: auto;
@@ -1661,19 +1663,28 @@ body,
 }
 
 .simulation-workspace-header {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(180px, .8fr) minmax(0, 1.5fr);
+  grid-template-areas:
+    "intro history"
+    "intro actions";
   gap: 16px;
   align-items: flex-start;
   margin: 20px 0;
 }
 
+.simulation-workspace-intro {
+  grid-area: intro;
+}
+
 .simulation-run-history {
-  display: flex;
-  justify-content: space-between;
+  grid-area: history;
+  display: grid;
+  grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr);
   gap: 12px;
-  align-items: center;
-  margin: 12px 0;
+  align-items: start;
+  min-width: 0;
+  margin: 0;
   padding: 12px;
   border: 1px solid #dbeafe;
   border-radius: 12px;
@@ -1691,7 +1702,9 @@ body,
 }
 
 .simulation-run-history select {
-  min-width: 280px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 9px;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
@@ -1699,9 +1712,17 @@ body,
 }
 
 .simulation-actions {
-  display: flex;
+  grid-area: actions;
+  display: grid;
   gap: 8px;
-  flex-wrap: wrap;
+  align-content: start;
+  min-width: 0;
+}
+
+.simulation-actions button {
+  min-width: 120px;
+  width: 100%;
+  white-space: normal;
 }
 
 .simulation-controls {
@@ -1724,6 +1745,72 @@ body,
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   padding: 9px;
+}
+
+.simulation-route-editor,
+.simulation-stored-reports {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.simulation-route-point {
+  display: grid;
+  grid-template-columns: minmax(80px, .7fr) repeat(2, minmax(130px, 1fr)) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.simulation-route-point label,
+.simulation-stored-report div {
+  display: grid;
+  gap: 4px;
+  color: #475569;
+  font-size: .8rem;
+  font-weight: 700;
+}
+
+.simulation-route-point input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+}
+
+.simulation-route-editor p {
+  margin: 0;
+  color: #64748b;
+  font-size: .82rem;
+}
+
+.simulation-stored-report {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+}
+
+.simulation-stored-report span {
+  color: #64748b;
+  font-size: .76rem;
+  font-weight: 400;
+}
+
+.simulation-pdf-preview iframe {
+  width: 100%;
+  height: min(80vh, 900px);
+  margin-top: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
 }
 
 .simulation-results {
@@ -1934,6 +2021,14 @@ body,
   .simulation-banner,
   .simulation-workspace-header {
     display: grid;
+  }
+
+  .simulation-workspace-header {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "intro"
+      "history"
+      "actions";
   }
 
   .simulation-results {
@@ -2223,6 +2318,34 @@ body,
   color: #475569;
 }
 
+.admin-help-requests {
+  margin-top: 32px;
+}
+
+.admin-help-report {
+  margin: 12px 0;
+  padding: 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+
+.admin-help-report-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-help-report-image {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  margin-top: 12px;
+  object-fit: contain;
+}
+
 .auth-form {
   display: flex;
   flex-direction: column;
@@ -2301,13 +2424,55 @@ body,
 
 .location-fields > div {
   display: flex;
-  flex-direction: column;
+  grid-template-columns: 1fr;
+}
+
+.simulation-run-history {
+  grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr);
+}
+
+.simulation-run-history > button {
+  grid-column: 1 / -1;
+}
+
+.simulation-actions {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.simulation-actions button {
+  width: auto;
+}
+
+.simulation-route-point,
+.simulation-stored-report {
+  grid-template-columns: 1fr;
+}
+
+@media (max-width: 900px) {
+  .simulation-workspace-header {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "intro"
+      "history"
+      "actions";
+  }
+
+  .simulation-run-history {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .simulation-actions {
+    display: grid;
+  }
 }
 
 @media (max-width: 767px) {
   .top-controls-bar {
-    top: 12px;
+    top: 64px;
     right: 12px;
+    left: 12px;
+    justify-content: flex-start;
     gap: 6px;
   }
   .btn-location,
