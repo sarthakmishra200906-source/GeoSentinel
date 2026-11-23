@@ -1,9 +1,18 @@
 import React, { Component } from 'react'
 import Login from './login'
-import Register from './regester'
 import NavigationCard from './NavigationCard'
+import PhoneVerification from './PhoneVerification'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+
+function getDismissedNotificationIds() {
+  try {
+    const storedIds = JSON.parse(localStorage.getItem('resq-ai-dismissed-notifications') || '[]')
+    return Array.isArray(storedIds) ? storedIds : []
+  } catch {
+    return []
+  }
+}
 
 const cardContent = {
   guideline: {
@@ -18,7 +27,11 @@ const cardContent = {
 }
 
 class NotificationPanel extends Component {
-  state = { notifications: [], error: '' }
+  state = {
+    notifications: [],
+    dismissedIds: getDismissedNotificationIds(),
+    error: '',
+  }
 
   componentDidMount() {
     this.loadNotifications()
@@ -41,24 +54,42 @@ class NotificationPanel extends Component {
   }
 
   markRead = async (notification) => {
-    await fetch(`${API_URL}/notifications/${notification._id}/read`, {
-      method: 'PATCH',
-      headers: { Authorization: `Bearer ${this.props.token}` },
-    })
-    this.setState((state) => ({ notifications: state.notifications.map((item) => item._id === notification._id ? { ...item, read: true } : item) }))
+    try {
+      if (this.props.token) {
+        const response = await fetch(`${API_URL}/notifications/${notification._id}/read`, {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${this.props.token}` },
+        })
+        if (!response.ok) throw new Error('Unable to dismiss this notification')
+      }
+      this.setState((state) => {
+        const dismissedIds = [...new Set([...state.dismissedIds, notification._id])].slice(-100)
+        localStorage.setItem('resq-ai-dismissed-notifications', JSON.stringify(dismissedIds))
+        return {
+          dismissedIds,
+          notifications: state.notifications.map((item) => item._id === notification._id ? { ...item, read: true } : item),
+          error: '',
+        }
+      })
+    } catch (error) {
+      this.setState({ error: error.message })
+    }
   }
 
   render() {
+    const unreadNotifications = this.state.notifications.filter(
+      (notification) => !notification.read && !this.state.dismissedIds.includes(notification._id),
+    )
     return (
       <div>
-        {this.state.notifications.map((notification) => (
+        {unreadNotifications.map((notification) => (
           <article key={notification._id}>
             <strong>{notification.title}</strong> · {notification.severity}
             <p>{notification.message}</p>
-            {!notification.read && <button type="button" onClick={() => this.markRead(notification)}>Mark read</button>}
+            <button type="button" aria-label={`Dismiss ${notification.title}`} onClick={() => this.markRead(notification)}>×</button>
           </article>
         ))}
-        {!this.state.notifications.length && !this.state.error && <p>No notifications.</p>}
+        {!unreadNotifications.length && !this.state.error && <p>No new notifications.</p>}
         {this.state.error && <p className="form-error">{this.state.error}</p>}
       </div>
     )
@@ -69,32 +100,65 @@ export default class Navbar extends Component {
   state = {
     isMenuOpen: false,
     activeCard: null,
+    authFlow: null,
   }
 
   openCard = (card) => {
-    this.setState({ activeCard: card, isMenuOpen: false })
+    this.setState({ activeCard: card, authFlow: null, isMenuOpen: false })
   }
 
   closeCard = () => {
-    this.setState({ activeCard: null })
+    this.setState({ activeCard: null, authFlow: null })
+  }
+
+  handleAuthResult = (result) => {
+    if (result.status === 'phone_verification_required') {
+      this.setState({ authFlow: { type: 'phone', ...result } })
+      return
+    }
+    if (result.status === 'pending_approval') {
+      this.setState({ authFlow: { type: 'pending', ...result } })
+      return
+    }
+    if (result.status === 'authenticated' && result.token && result.user) {
+      this.props.onAuthenticated(result)
+      this.closeCard()
+      return
+    }
+    throw new Error('The server returned an unexpected authentication status')
   }
 
   renderCard() {
     const { activeCard } = this.state
     if (!activeCard) return null
 
-    if (activeCard === 'login') {
+    if (this.state.authFlow?.type === 'phone') {
       return (
-        <NavigationCard title="Log in" onClose={this.closeCard}>
-          <Login onSuccess={this.props.onAuthenticated} />
+        <NavigationCard title="Verify your phone" onClose={this.closeCard}>
+          <PhoneVerification
+            verificationToken={this.state.authFlow.verificationToken}
+            phoneToVerify={this.state.authFlow.phoneToVerify}
+            onAuthResult={this.handleAuthResult}
+          />
         </NavigationCard>
       )
     }
 
-    if (activeCard === 'register') {
+    if (this.state.authFlow?.type === 'pending') {
       return (
-        <NavigationCard title="Create an account" onClose={this.closeCard}>
-          <Register onSuccess={this.props.onAuthenticated} />
+        <NavigationCard title="Approval pending" onClose={this.closeCard}>
+          <div className="auth-form">
+            <p>Your email and phone are verified. An administrator must approve your account before you can access GeoSentinel.</p>
+            <p>After approval, log in again to continue.</p>
+          </div>
+        </NavigationCard>
+      )
+    }
+
+    if (activeCard === 'login') {
+      return (
+        <NavigationCard title="Admin sign-in" onClose={this.closeCard}>
+          <Login onAuthResult={this.handleAuthResult} />
         </NavigationCard>
       )
     }
@@ -102,7 +166,7 @@ export default class Navbar extends Component {
     if (activeCard === 'ai') {
       return (
         <NavigationCard title="Resq-AI assistant" onClose={this.closeCard}>
-          <AiPanel token={this.props.token} />
+          <AiPanel />
         </NavigationCard>
       )
     }
@@ -171,6 +235,7 @@ export default class Navbar extends Component {
                         ['overview', 'Overview'],
                         ['simulation', 'Simulation'],
                         ['operations', 'Operations'],
+                        ['users', 'Users & access'],
                         ['guidelines', 'Guidelines & upload'],
                         ['audit', 'Audit log'],
                         ['live-map', 'Live cyclone map'],
@@ -199,11 +264,14 @@ export default class Navbar extends Component {
               </>
             ) : (
               <>
-                <button className="menu-item" type="button" onClick={() => this.openCard('login')}>
-                  Log in
+                <button className="menu-item" type="button" onClick={() => this.openCard('ai')}>
+                  AI assistant
                 </button>
-                <button className="menu-item" type="button" onClick={() => this.openCard('register')}>
-                  Register
+                <button className="menu-item" type="button" onClick={() => this.openCard('notifications')}>
+                  Notifications
+                </button>
+                <button className="menu-item" type="button" onClick={() => this.openCard('login')}>
+                  Admin sign in
                 </button>
               </>
             )}
@@ -325,32 +393,260 @@ class HelpPanel extends Component {
 }
 
 class AiPanel extends Component {
-  state = { message: '', response: null, error: '', isSending: false }
+  state = {
+    message: '',
+    response: null,
+    error: '',
+    isSending: false,
+    isListening: false,
+    voiceStatus: '',
+    apiNotice: '',
+    showDiagnostics: false,
+  }
 
-  submit = async (event) => {
-    event.preventDefault()
+  recognition = null
+  silenceTimer = null
+  restartTimer = null
+  shouldContinueListening = false
+  voiceTranscript = ''
+
+  componentDidMount() {
+    this.checkApiIdentity()
+  }
+
+  componentWillUnmount() {
+    this.stopListening()
+    window.speechSynthesis?.cancel()
+  }
+
+  checkApiIdentity = async () => {
+    try {
+      const response = await fetch(`${API_URL}/health`)
+      if (!response.ok) {
+        this.setState({
+          apiNotice: `Connected to ${API_URL} (HTTP ${response.status}). Verify that the GeoSentinel backend is active.`,
+        })
+        return
+      }
+      const data = await response.json()
+      if (data?.service !== 'geosentinel-api') {
+        this.setState({
+          apiNotice: `Port conflict detected: ${API_URL} identified as "${data?.service || 'unknown application'}". Ensure the GeoSentinel backend is running on port 5000.`,
+        })
+      }
+    } catch {
+      // Backend may still be starting up or running in offline mode.
+    }
+  }
+
+  toggleVoiceInput = () => {
+    if (this.state.isListening) {
+      this.stopListening()
+      return
+    }
+    this.startListening()
+  }
+
+  startListening = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      this.setState({ error: 'Voice input is not supported by this browser. You can type your question below.' })
+      return
+    }
+    this.shouldContinueListening = true
+    this.voiceTranscript = this.state.message.trim()
+    this.setState({
+      error: '',
+      isListening: true,
+      voiceStatus: 'Listening continuously… speak your question across natural pauses.',
+    })
+    this.initRecognition(SpeechRecognition)
+  }
+
+  initRecognition = (SpeechRecognition) => {
+    if (!this.shouldContinueListening) return
+
+    try {
+      if (this.recognition) {
+        this.recognition.onend = null
+        this.recognition.onerror = null
+        this.recognition.onresult = null
+        try { this.recognition.abort() } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+
+    const rec = new SpeechRecognition()
+    rec.lang = navigator.language || 'en-US'
+    rec.continuous = true
+    rec.interimResults = true
+
+    rec.onresult = (event) => {
+      let interim = ''
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const transcript = event.results[index][0].transcript
+        if (event.results[index].isFinal) {
+          this.voiceTranscript = [this.voiceTranscript, transcript.trim()].filter(Boolean).join(' ')
+        } else {
+          interim = [interim, transcript.trim()].filter(Boolean).join(' ')
+        }
+      }
+      const fullText = [this.voiceTranscript, interim].filter(Boolean).join(' ')
+      this.setState({
+        message: fullText,
+        voiceStatus: 'Voice captured. Keep speaking or pause to finish.',
+      })
+
+      // Silence detection: 6.5s after speech, automatically stop and submit
+      window.clearTimeout(this.silenceTimer)
+      if (fullText.trim().length > 0) {
+        this.silenceTimer = window.setTimeout(() => {
+          if (this.state.isListening && this.state.message.trim()) {
+            this.stopAndSubmit()
+          }
+        }, 6500)
+      }
+    }
+
+    rec.onerror = (event) => {
+      // Never break mid-chat on short quiet periods
+      if (event.error === 'no-speech') return
+
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        this.shouldContinueListening = false
+        this.setState({
+          error: 'Microphone permission was denied. Allow microphone access in your browser to use voice input.',
+          isListening: false,
+          voiceStatus: '',
+        })
+      }
+    }
+
+    rec.onend = () => {
+      if (this.shouldContinueListening) {
+        // Continuous listening: restart cleanly without cutting off mid-speech
+        this.restartTimer = window.setTimeout(() => {
+          if (this.shouldContinueListening) {
+            this.initRecognition(SpeechRecognition)
+          }
+        }, 150)
+      } else {
+        this.setState({ isListening: false, voiceStatus: '' })
+      }
+    }
+
+    this.recognition = rec
+    try {
+      rec.start()
+    } catch {
+      if (this.shouldContinueListening) {
+        this.restartTimer = window.setTimeout(() => {
+          if (this.shouldContinueListening) this.initRecognition(SpeechRecognition)
+        }, 300)
+      }
+    }
+  }
+
+  stopListening = () => {
+    this.shouldContinueListening = false
+    window.clearTimeout(this.silenceTimer)
+    window.clearTimeout(this.restartTimer)
+    try {
+      this.recognition?.stop()
+    } catch { /* ignore */ }
+    this.setState({ isListening: false, voiceStatus: '' })
+  }
+
+  stopAndSubmit = () => {
+    this.stopListening()
     const message = this.state.message.trim()
-    if (!message) return
+    if (message) {
+      this.sendQuery(message, true)
+    }
+  }
+
+  speakAnswer = (explicitText) => {
+    const answer = explicitText || this.state.response?.answer
+    if (!answer || !window.speechSynthesis || !window.SpeechSynthesisUtterance) {
+      this.setState({ error: 'Voice playback is not supported by this browser.' })
+      return
+    }
+    window.speechSynthesis.cancel()
+    const utterance = new window.SpeechSynthesisUtterance(answer)
+    utterance.rate = 1.0
+    utterance.pitch = 1.0
+    window.speechSynthesis.speak(utterance)
+  }
+
+  sendQuery = async (queryText, autoSpeak = false) => {
+    const text = (queryText || this.state.message).trim()
+    if (!text) return
 
     this.setState({ error: '', isSending: true })
     try {
       const response = await fetch(`${API_URL}/chat/message`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.props.token}`,
-        },
-        body: JSON.stringify({ message }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
       })
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.message || data.error || 'Unable to contact the AI assistant')
-      this.setState({ response: data.data, message: '' })
+      const responseText = await response.text()
+      let data = null
+      try {
+        data = JSON.parse(responseText)
+      } catch {
+        data = null
+      }
+      if (!response.ok) {
+        const errorMsg = response.status === 401
+          ? 'The chat server requires authentication. Verify VITE_API_URL and restart the GeoSentinel backend.'
+          : response.status === 404
+            ? 'The GeoSentinel chat endpoint was not found. Check that the backend is running.'
+            : response.status === 429
+              ? 'Too many requests. Please wait a moment and try again.'
+              : data?.message || data?.error || `The chat server returned HTTP ${response.status}.`
+        throw new Error(errorMsg)
+      }
+      if (!data?.data) {
+        throw new Error('Unreadable response from chat server.')
+      }
+
+      const chatData = data.data
+      this.setState({
+        response: chatData,
+        message: '',
+        error: '',
+      })
+
+      if (autoSpeak && chatData.answer) {
+        this.speakAnswer(chatData.answer)
+      }
     } catch (error) {
-      this.setState({ error: error.message })
+      this.setState({
+        response: {
+          status: 'SAFE_FALLBACK',
+          answer: 'For emergency assistance, dial 112 (National Emergency Helpline). In flood, cyclone, or severe weather events: seek high ground or sturdy indoor shelter, stay away from downed power lines, and keep an emergency go-bag prepared.',
+          warnings: [error instanceof TypeError ? 'Cannot reach local backend; showing public disaster advisory.' : error.message],
+          sources: [{
+            documentId: 'local-emergency-advisory',
+            title: 'National Disaster Preparedness Standards',
+            issuingAuthority: 'NDMA Safety Guidelines',
+            officialUrl: 'https://ndma.gov.in',
+          }],
+        },
+        error: '',
+      })
     } finally {
       this.setState({ isSending: false })
     }
+  }
 
+  submit = (event) => {
+    event.preventDefault()
+    this.sendQuery(this.state.message, false)
+  }
+
+  handleChipClick = (chipQuery) => {
+    this.setState({ message: chipQuery })
+    this.sendQuery(chipQuery, false)
   }
 
   render() {
@@ -360,38 +656,165 @@ class AiPanel extends Component {
         source,
       ]),
     ).values()]
+
+    const suggestions = [
+      '🌪️ Cyclone safety checklist',
+      '🌊 Flood evacuation steps',
+      '⚡ Lightning shelter guide',
+      '🎒 Emergency go-bag items',
+      '📞 Emergency helplines (112)',
+    ]
+
+    const statusBadge = this.state.response?.status === 'GROUNDED'
+      ? { label: '🛡️ Official Guidelines Grounded', className: 'badge-grounded' }
+      : this.state.response?.status === 'SAFE_FALLBACK'
+        ? { label: 'ℹ️ Disaster Safety Advisory', className: 'badge-fallback' }
+        : { label: this.state.response?.status || 'Active', className: 'badge-default' }
+
     return (
-      <form className="auth-form" onSubmit={this.submit}>
-        <p>Ask a question. Answers are generated only from approved government guidance; contact local emergency services for immediate danger.</p>
-        <label htmlFor="ai-message">Message</label>
-        <textarea
-          id="ai-message"
-          value={this.state.message}
-          onChange={(event) => this.setState({ message: event.target.value })}
-          required
-          rows="4"
-        />
-        <button className="form-submit" type="submit" disabled={this.state.isSending}>
-          {this.state.isSending ? 'Sending…' : 'Send message'}
-        </button>
+      <div className="resq-chat-panel">
+        {this.state.apiNotice && (
+          <div className="chat-alert-banner" role="alert">
+            <span>{this.state.apiNotice}</span>
+          </div>
+        )}
+
+        <div className="chat-suggestions-container">
+          <span className="chat-suggestions-label">Quick Safety Topics:</span>
+          <div className="chat-suggestion-chips">
+            {suggestions.map((topic) => (
+              <button
+                key={topic}
+                type="button"
+                className="chat-suggestion-chip"
+                onClick={() => this.handleChipClick(topic.slice(3).trim())}
+              >
+                {topic}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <form className="auth-form chat-form" onSubmit={this.submit}>
+          <label htmlFor="ai-message" className="chat-input-label">
+            Ask Emergency & Disaster AI Assistant
+          </label>
+          <textarea
+            id="ai-message"
+            value={this.state.message}
+            onChange={(event) => this.setState({ message: event.target.value })}
+            placeholder="Describe an emergency, ask about evacuation, storm safety, or first aid…"
+            required
+            rows="3"
+          />
+
+          <div className="chat-voice-actions">
+            <button
+              type="button"
+              className={`btn-voice ${this.state.isListening ? 'is-active' : ''}`}
+              onClick={this.toggleVoiceInput}
+              aria-pressed={this.state.isListening}
+            >
+              {this.state.isListening ? '🛑 Stop listening' : '🎙️ Speak (Continuous Voice)'}
+            </button>
+
+            {this.state.isListening && (
+              <button
+                type="button"
+                className="btn-voice-done"
+                onClick={this.stopAndSubmit}
+                disabled={!this.state.message.trim()}
+              >
+                ⚡ Done & Ask AI
+              </button>
+            )}
+          </div>
+
+          {this.state.isListening && (
+            <div className="voice-listening-indicator" role="status" aria-live="polite">
+              <div className="voice-wave-bars">
+                <span className="wave-bar" />
+                <span className="wave-bar" />
+                <span className="wave-bar" />
+                <span className="wave-bar" />
+              </div>
+              <p className="voice-status-text">
+                {this.state.voiceStatus || 'Listening continuously across pauses…'}
+              </p>
+            </div>
+          )}
+
+          <button className="form-submit chat-submit-btn" type="submit" disabled={this.state.isSending}>
+            {this.state.isSending ? 'Consulting Disaster AI…' : 'Send Question'}
+          </button>
+        </form>
+
         {this.state.response && (
-          <div className={this.state.response.status === 'GROUNDED' ? 'form-success' : 'form-error'} role="status">
-            <strong>{this.state.response.status}</strong>
-            <p>{this.state.response.answer || this.state.response.warnings?.[0] || 'No supported answer is available.'}</p>
-            {sources.length > 0 && (
-              <ul>
-                {sources.map((source) => (
-                  <li key={`${source.documentId}-${source.page ?? source.section ?? source.officialUrl}`}>
-                    <a href={source.officialUrl} target="_blank" rel="noreferrer">{source.title}</a>
-                    {source.page ? `, page ${source.page}` : ''}
-                  </li>
+          <div className={`chat-response-card ${this.state.response.status === 'GROUNDED' ? 'is-grounded' : ''}`} role="status" aria-live="polite">
+            <div className="chat-response-header">
+              <span className={`status-pill ${statusBadge.className}`}>{statusBadge.label}</span>
+              {this.state.response.answer && (
+                <button className="chat-speak-button" type="button" onClick={() => this.speakAnswer()}>
+                  <span aria-hidden="true">🔊</span> Read aloud
+                </button>
+              )}
+            </div>
+
+            <p className="chat-response-text">
+              {this.state.response.answer || this.state.response.warnings?.[0] || 'No supported guidance available.'}
+            </p>
+
+            {this.state.response.warnings?.length > 0 && (
+              <div className="chat-warnings-box">
+                {this.state.response.warnings.map((warning) => (
+                  <small key={warning} className="chat-warning-item">⚠️ {warning}</small>
                 ))}
-              </ul>
+              </div>
+            )}
+
+            {sources.length > 0 && (
+              <div className="chat-sources-section">
+                <span className="chat-sources-title">Verified Official References:</span>
+                <ul className="chat-sources-list">
+                  {sources.map((source) => (
+                    <li key={`${source.documentId}-${source.page ?? source.section ?? source.officialUrl}`}>
+                      <a href={source.officialUrl} target="_blank" rel="noreferrer">
+                        {source.title}
+                      </a>
+                      {source.issuingAuthority ? ` (${source.issuingAuthority})` : ''}
+                      {source.page ? `, p. ${source.page}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {(this.state.response.provider || this.state.response.diagnostics) && (
+              <div className="chat-diagnostics-section">
+                <button
+                  type="button"
+                  className="chat-diagnostics-toggle"
+                  onClick={() => this.setState((prev) => ({ showDiagnostics: !prev.showDiagnostics }))}
+                >
+                  {this.state.showDiagnostics ? '▼ Hide AI diagnostics' : '▶ Show AI provider diagnostics'}
+                </button>
+                {this.state.showDiagnostics && (
+                  <pre className="chat-diagnostics-pre">
+                    {JSON.stringify({
+                      status: this.state.response.status,
+                      provider: this.state.response.provider,
+                      model: this.state.response.model,
+                      diagnostics: this.state.response.diagnostics,
+                    }, null, 2)}
+                  </pre>
+                )}
+              </div>
             )}
           </div>
         )}
-        {this.state.error && <p className="form-error">{this.state.error}</p>}
-      </form>
+
+        {this.state.error && <p className="chat-response form-error" role="status">{this.state.error}</p>}
+      </div>
     )
   }
 }

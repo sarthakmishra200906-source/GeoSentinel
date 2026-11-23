@@ -20,3 +20,6 @@ Backend/rag_service/documents/
 Backend/rag_service/index/
 Frontend/Resq-AI/node_modules/
 Frontend/Resq-AI/dist/
+*-complete-evidence-*.pdf
+*-executive-summary.json
+*-india-state-impacts.csv

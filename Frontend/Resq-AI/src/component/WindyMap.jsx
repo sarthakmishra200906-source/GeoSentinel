@@ -46,6 +46,9 @@ export default function WindyMap({ onSwitchToMap }) {
   const [rainRadar, setRainRadar] = useState(false)
   const [showCyclones, setShowCyclones] = useState(true)
   const [storms, setStorms] = useState([])
+  const [stormFeed, setStormFeed] = useState({ available: false, status: 'loading', fetchedAt: null, error: null })
+  const [analysisStormId, setAnalysisStormId] = useState('')
+  const [stormFeedLoading, setStormFeedLoading] = useState(false)
   const [radarTileUrl, setRadarTileUrl] = useState('')
   const [userLocation, setUserLocation] = useState(null)
   const [cardOpen, setCardOpen] = useState(false)
@@ -60,22 +63,34 @@ export default function WindyMap({ onSwitchToMap }) {
     }
   }, [])
 
-  // ── Fetch active cyclones worldwide ───────────────────────────────────────
-  const fetchStorms = useCallback(async () => {
+  // ── Fetch current and recent India-region cyclone events ──────────────────
+  const fetchStorms = useCallback(async (showLoading = false) => {
+    if (showLoading) setStormFeedLoading(true)
     try {
       const res = await fetch(`${API_URL}/weather/storms`)
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Unable to load cyclone data')
-      if (data.available !== true) throw new Error(data.error || 'Live cyclone feed is unavailable')
-      const tracks = Array.isArray(data.tracks) ? data.tracks : []
-      setStorms(tracks)
-      postToIframe({ type: 'update-cyclones', storms: tracks, enabled: showCyclones })
+      if (data.available === true) {
+        setStorms(Array.isArray(data.tracks) ? data.tracks : [])
+      }
+      setStormFeed({
+        available: data.available === true,
+        status: data.status || 'unavailable',
+        fetchedAt: data.fetchedAt || null,
+        error: data.available === true ? null : data.error || 'Live cyclone feed is unavailable',
+      })
     } catch (error) {
-      setStorms([])
-      postToIframe({ type: 'update-cyclones', storms: [], enabled: showCyclones })
       console.warn('Unable to load cyclone data:', error)
+      setStormFeed({
+        available: false,
+        status: 'unavailable',
+        fetchedAt: null,
+        error: error.message || 'Live cyclone feed is unavailable',
+      })
+    } finally {
+      if (showLoading) setStormFeedLoading(false)
     }
-  }, [postToIframe, showCyclones])
+  }, [])
 
   // ── Fetch rain radar tile endpoint (RainViewer Universal Blue) ───────────
   const fetchRadarUrl = useCallback(async () => {
@@ -125,7 +140,8 @@ export default function WindyMap({ onSwitchToMap }) {
   // ── Focus map onto specific cyclone eye ────────────────────────────────────
   const focusOnStorm = (storm) => {
     if (!storm || !storm.coordinates || !storm.coordinates[0]) return
-    const eye = storm.coordinates[0]
+    const eye = storm.coordinates[storm.coordinates.length - 1]
+    setAnalysisStormId(storm.id)
     postToIframe({
       type: 'focus-cyclone',
       id: storm.id,
@@ -187,6 +203,10 @@ export default function WindyMap({ onSwitchToMap }) {
   }, [fetchStorms])
 
   useEffect(() => {
+    postToIframe({ type: 'update-cyclones', storms, enabled: showCyclones })
+  }, [postToIframe, showCyclones, storms])
+
+  useEffect(() => {
     fetchRadarUrl()
   }, [fetchRadarUrl])
 
@@ -224,6 +244,21 @@ export default function WindyMap({ onSwitchToMap }) {
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
   }, [activeOverlay, satellite, rainRadar, storms, showCyclones, radarTileUrl, postToIframe])
+
+  const analysisStorm = storms.find((storm) => storm.id === analysisStormId) || storms[0]
+  const analysisCoordinate = analysisStorm?.coordinates?.[analysisStorm.coordinates.length - 1]
+  const stormStatusLabel = (status) => {
+    if (status === 'ACTIVE_LIVE_GDACS') return 'ACTIVE'
+    if (status === 'UPCOMING_GDACS') return 'UPCOMING'
+    if (status === 'RECENT_GDACS') return 'RECENT · ENDED'
+    return 'STATUS UNCONFIRMED'
+  }
+  const formatStormDate = (value) => {
+    const date = value ? new Date(value) : null
+    return date && Number.isFinite(date.getTime())
+      ? date.toLocaleString()
+      : 'Not reported'
+  }
 
   // ── GPS locate ─────────────────────────────────────────────────────────────
   const locateMe = () => {
@@ -335,6 +370,97 @@ export default function WindyMap({ onSwitchToMap }) {
           </button>
         )}
       </div>
+
+      <section className="cyclone-analysis-panel" aria-labelledby="cyclone-analysis-title" aria-live="polite">
+        <div className="cyclone-analysis-heading">
+          <div>
+            <h2 id="cyclone-analysis-title">🌀 Live cyclone analysis</h2>
+            <p>
+              GDACS event feed
+              {stormFeed.fetchedAt ? ` · checked ${formatStormDate(stormFeed.fetchedAt)}` : ''}
+            </p>
+            <p>Reported tracks are not forecasts. Landfall location, timing, and cyclone impacts are unavailable.</p>
+          </div>
+          <button type="button" onClick={() => fetchStorms(true)} disabled={stormFeedLoading}>
+            {stormFeedLoading ? 'Checking…' : 'Refresh'}
+          </button>
+        </div>
+
+        {!stormFeed.available ? (
+          <p className="cyclone-analysis-status error">
+            Feed unavailable. The map cannot confirm whether a cyclone is active.
+            {stormFeed.error ? ` ${stormFeed.error}` : ''}
+          </p>
+        ) : storms.length === 0 ? (
+          <p className="cyclone-analysis-status">
+            No active or recent India-region cyclone events are currently listed by GDACS.
+          </p>
+        ) : (
+          <>
+            <p className="cyclone-analysis-status">
+              {stormFeed.status === 'recent_events'
+                ? 'No active event is listed; recent ended events remain visible for 14 days.'
+                : `${storms.filter((storm) => storm.status === 'ACTIVE_LIVE_GDACS').length} active · ${storms.filter((storm) => storm.status === 'UPCOMING_GDACS').length} upcoming · ${storms.filter((storm) => storm.status === 'RECENT_GDACS').length} recent`}
+            </p>
+            <div className="cyclone-analysis-list">
+              {storms.map((storm) => (
+                <button
+                  type="button"
+                  className={`cyclone-analysis-event${analysisStorm?.id === storm.id ? ' selected' : ''}`}
+                  key={storm.id}
+                  onClick={() => focusOnStorm(storm)}
+                >
+                  <span className="cyclone-analysis-event-title">
+                    <strong>{storm.name.replace(/^🌀\s*/, '')}</strong>
+                    <span className={`cyclone-event-status ${storm.status.toLowerCase()}`}>
+                      {stormStatusLabel(storm.status)}
+                    </span>
+                  </span>
+                  <span>{storm.category} · {storm.maxWindKmh ? `${storm.maxWindKmh} km/h max wind` : 'wind not reported'}</span>
+                  <span>{storm.validFrom ? formatStormDate(storm.validFrom) : 'Start date not reported'} – {storm.validUntil ? formatStormDate(storm.validUntil) : 'End date not reported'}</span>
+                </button>
+              ))}
+            </div>
+            {analysisStorm && (
+              <div className="cyclone-analysis-detail">
+                <strong>
+                  {analysisStorm.status === 'RECENT_GDACS' ? 'Last reported position' : 'Reported position'}
+                  {analysisCoordinate ? ` · ${analysisCoordinate[0].toFixed(2)}°, ${analysisCoordinate[1].toFixed(2)}°` : ''}
+                </strong>
+                <span>
+                  {analysisStorm.locationType === 'LineString'
+                    ? `Provider-reported track · ${analysisStorm.coordinates.length} positions; no landfall forecast is available here.`
+                    : 'GDACS supplied a point location; it did not provide a centerline track for this event.'}
+                </span>
+                <span>Last provider update: {formatStormDate(analysisStorm.lastUpdated)}</span>
+                {analysisStorm.reportUrl && (
+                  <a href={analysisStorm.reportUrl} target="_blank" rel="noreferrer">
+                    Open GDACS event report
+                  </a>
+                )}
+                <button type="button" onClick={() => focusOnStorm(analysisStorm)}>
+                  Inspect position and local telemetry
+                </button>
+                {analysisStorm.id === analysisStormId && (weather || prediction) && (
+                  <div className="cyclone-analysis-telemetry">
+                    <span>
+                      Local weather: {weather
+                        ? `${fmt(weather.temperature, '°C')} · ${weather.condition || 'conditions unavailable'} · ${fmt(weather.rainfall1h, ' mm/h rain')}`
+                        : 'Unavailable'}
+                    </span>
+                    <span>
+                      Current flood-risk proxy: {prediction
+                        ? `${String(prediction.riskTier || prediction.risk_tier || 'UNAVAILABLE').toUpperCase()} · ${fmt(Number(prediction.probability) * 100, '%')}`
+                        : 'Unavailable'}
+                    </span>
+                    <small>Landfall location and cyclone impacts are not forecast here. This is current local telemetry and a flood-risk proxy, not a cyclone-impact forecast or measured damage report.</small>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </section>
 
       {/* User Location Badge */}
       {userLocation && (

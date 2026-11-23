@@ -1,12 +1,14 @@
 import { Router } from 'express'
 import Report from '../models/Report.js'
 import AdminVerification from '../models/AdminVerification.js'
+import User from '../models/User.js'
 import GuidelineDocument from '../models/GuidelineDocument.js'
 import AuditEvent from '../models/AuditEvent.js'
 import crypto from 'node:crypto'
 import multer from 'multer'
 import { requireAdmin } from '../middleware/admin.js'
 import { recordAuditEvent } from '../services/audit.js'
+import { getLlmProviderStatus } from '../services/groundedChat.js'
 import mongoose from 'mongoose'
 import { extractPdfText, isReadableText } from '../services/pdfTextExtraction.js'
 
@@ -34,12 +36,8 @@ router.get('/health', ...requireAdmin, async (_request, response) => {
     mongodb: mongoose.connection.readyState === 1 ? 'online' : 'offline',
     ml,
     weather: process.env.OPENWEATHER_API_KEY ? 'configured' : 'offline',
-    llm: process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.LLM_API_KEY ? 'configured' : 'offline',
-    llmProvider: (process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || (!process.env.LLM_API_URL && process.env.LLM_API_KEY))
-      ? 'gemini'
-      : process.env.LLM_API_URL
-        ? 'openai-compatible'
-        : 'offline',
+    llm: getLlmProviderStatus() === 'offline' ? 'offline' : 'configured',
+    llmProvider: getLlmProviderStatus(),
     checkedAt: new Date().toISOString(),
   })
 })
@@ -93,7 +91,72 @@ router.patch('/reports/:id/status', ...requireAdmin, async (request, response, n
 
 router.get('/verifications', ...requireAdmin, async (_request, response, next) => {
   try {
-    response.json(await AdminVerification.find({ status: 'pending' }).populate('user', 'name email phone').lean())
+    response.json(
+      await AdminVerification.find({ status: 'pending' })
+        .populate('user', 'name email phone isEmailVerified isPhoneVerified')
+        .lean(),
+    )
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/users', ...requireAdmin, async (_request, response, next) => {
+  try {
+    response.json(
+      await User.find({ role: 'user', isApproved: false })
+        .select('name email phone isEmailVerified isPhoneVerified createdAt')
+        .sort({ createdAt: 1 })
+        .limit(100)
+        .lean(),
+    )
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.patch('/users/:id/approval', ...requireAdmin, async (request, response, next) => {
+  try {
+    if (typeof request.body.isApproved !== 'boolean') {
+      response.status(400).json({ error: 'isApproved must be a boolean' })
+      return
+    }
+    if (request.params.id === request.user._id.toString()) {
+      response.status(400).json({ error: 'You cannot change your own account approval' })
+      return
+    }
+    const user = await User.findById(request.params.id)
+    if (!user) {
+      response.status(404).json({ error: 'User not found' })
+      return
+    }
+    if (user.role !== 'user') {
+      response.status(409).json({ error: 'Admin accounts must be managed through admin verification requests' })
+      return
+    }
+    if (request.body.isApproved && (!user.isEmailVerified || !user.isPhoneVerified)) {
+      response.status(409).json({ error: 'A verified email and phone are required before approval' })
+      return
+    }
+    const oldStatus = user.isApproved ? 'approved' : 'pending'
+    user.isApproved = request.body.isApproved
+    await user.save()
+    await recordAuditEvent({
+      request,
+      actor: request.user._id,
+      action: 'user.approval',
+      targetType: 'User',
+      targetId: user._id,
+      oldStatus,
+      newStatus: user.isApproved ? 'approved' : 'pending',
+    })
+    response.json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      isApproved: user.isApproved,
+    })
   } catch (error) {
     next(error)
   }
@@ -106,17 +169,29 @@ router.patch('/verifications/:id', ...requireAdmin, async (request, response, ne
       response.status(400).json({ error: 'status must be approved or rejected' })
       return
     }
-    const verification = await AdminVerification.findByIdAndUpdate(
-      request.params.id,
-      { status, reviewedBy: request.user._id, reviewedAt: new Date(), reviewNote: request.body.reviewNote || '' },
-      { new: true },
-    )
+    const verification = await AdminVerification.findById(request.params.id)
     if (!verification) {
       response.status(404).json({ error: 'Verification request not found' })
       return
     }
+    const targetUser = await User.findById(verification.user)
+    if (!targetUser) {
+      response.status(404).json({ error: 'Applicant account no longer exists' })
+      return
+    }
+    if (status === 'approved' && (!targetUser.isEmailVerified || !targetUser.isPhoneVerified)) {
+      response.status(409).json({ error: 'A verified email and phone are required before admin approval' })
+      return
+    }
+    verification.status = status
+    verification.reviewedBy = request.user._id
+    verification.reviewedAt = new Date()
+    verification.reviewNote = request.body.reviewNote || ''
+    await verification.save()
     if (status === 'approved') {
-      await (await import('../models/User.js')).default.findByIdAndUpdate(verification.user, { role: 'admin' })
+      targetUser.role = 'admin'
+      targetUser.isApproved = true
+      await targetUser.save()
     }
     await recordAuditEvent({
       request,

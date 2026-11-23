@@ -10,6 +10,8 @@ import { recordAuditEvent } from '../services/audit.js'
 import { validateSimulationName, validateSimulationParameters } from '../services/simulationValidation.js'
 import { calculateSimulationStep } from '../services/simulationEngine.js'
 import { buildSimulationPdf, createSimulationReportSummary } from '../services/simulationPdfReport.js'
+import { deleteSimulationRunData } from '../services/simulationRunDeletion.js'
+import { deleteSimulationReport } from '../services/simulationReportDeletion.js'
 
 const router = Router()
 const RUN_PAGE_SIZE = 50
@@ -192,6 +194,46 @@ router.get('/runs', ...requireAdmin, async (request, response, next) => {
   }
 })
 
+router.delete('/runs/:id', ...requireAdmin, async (request, response, next) => {
+  try {
+    const run = await SimulationRun.findOne({
+      _id: request.params.id,
+      owner: request.user._id,
+    }).select('_id owner scenario status sequence')
+    if (!run) {
+      response.status(404).json({ error: 'Owned simulation run not found' })
+      return
+    }
+
+    const removed = await deleteSimulationRunData({
+      run,
+      models: { SimulationRun, SimulationTimestep, SimulationReport, SimulationScenario },
+    })
+    if (!removed) {
+      response.status(404).json({ error: 'Owned simulation run not found' })
+      return
+    }
+    await recordAuditEvent({
+      request,
+      actor: request.user._id,
+      action: 'simulation.run.deleted',
+      targetType: 'SimulationRun',
+      targetId: run._id,
+      oldStatus: run.status,
+      changes: {
+        sequence: run.sequence,
+        timestepCount: removed.timestepCount,
+        reportCount: removed.reportCount,
+        scenarioDeleted: removed.scenarioDeleted,
+        dataSource: 'synthetic_simulation',
+      },
+    })
+    response.json({ deleted: true, runId: run._id, ...removed })
+  } catch (error) {
+    next(error)
+  }
+})
+
 router.get('/runs/:id', ...requireAdmin, async (request, response, next) => {
   try {
     const run = await SimulationRun.findOne({
@@ -308,6 +350,59 @@ router.get('/runs/:id/reports/:reportId/pdf', ...requireAdmin, async (request, r
       .set('Content-Disposition', `${disposition}; filename="${report.fileName}"`)
       .set('X-Report-SHA256', report.sha256)
       .send(report.pdf)
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.delete('/runs/:id/reports/:reportId', ...requireAdmin, async (request, response, next) => {
+  try {
+    const run = await SimulationRun.findOne({
+      _id: request.params.id,
+      $or: [{ owner: request.user._id }, { collaborators: request.user._id }],
+    }).select('_id owner')
+    if (!run) {
+      response.status(404).json({ error: 'Simulation run not found' })
+      return
+    }
+
+    const isRunOwner = run.owner.toString() === request.user._id.toString()
+    const report = await deleteSimulationReport({
+      reportId: request.params.reportId,
+      runId: run._id,
+      owner: isRunOwner ? null : request.user._id,
+      SimulationReport,
+    })
+    if (!report) {
+      response.status(404).json({ error: 'Stored simulation PDF not found' })
+      return
+    }
+
+    let auditError = null
+    try {
+      await recordAuditEvent({
+        request,
+        actor: request.user._id,
+        action: 'simulation.report.deleted',
+        targetType: 'SimulationReport',
+        targetId: report.id,
+        changes: {
+          runId: run._id,
+          fileName: report.fileName,
+          sha256: report.sha256,
+          generatedAt: report.generatedAt,
+          timestepCount: report.summary?.timestepCount || 0,
+        },
+      })
+    } catch (error) {
+      console.error({ requestId: request.id, error })
+      auditError = 'PDF was deleted, but its audit event could not be recorded.'
+    }
+    response.status(auditError ? 503 : 200).json({
+      deleted: true,
+      reportId: report.id,
+      auditError,
+    })
   } catch (error) {
     next(error)
   }

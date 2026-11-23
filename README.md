@@ -5,39 +5,21 @@ Express/MongoDB backend, and FastAPI machine-learning service.
 
 ## Current status
 
-The local baseline, weather map, non-operational flood model, admin
-verification flow, rescue-center APIs, and approved-document retrieval
-foundation are implemented. The flood model is not an operational alert model,
-and the retrieval foundation does not call an LLM until a provider and
-document-review process are configured.
-
-## Contributor handoff index
-
-Read these before changing the project:
-
-- [goal.md](./goal.md): mission and deployable definition.
-- [precaution.md](./precaution.md): safety, privacy, live-data, AI, and
-  simulation boundaries.
-- [work.md](./work.md): current implementation, routes, commands, and gates.
-- [simulation_test_plan.md](./simulation_test_plan.md): authoritative simulator
-  scope and isolation design.
-- [test3.md](./test3.md): latest full 24-hour simulation test.
-- [test4.md](./test4.md): latest two-hour UI cyclone rehearsal and responsive
-  navigation verification.
-- [sarthak.md](./sarthak.md): current admin workflow, saved runs, stored PDFs,
-  route limits, and live-map separation.
-- [help.md](./help.md): startup and manual verification checklist.
+The app provides public map, safety, help-report, notification, and AI-assistant
+features. Sign-in is reserved for administrators. Weather and flood-risk
+indicators are decision-support data, not official emergency alerts. The live
+cyclone panel shows provider-reported events and local telemetry; it does not
+predict landfall or cyclone impacts.
 
 Do not treat synthetic simulation data as live weather or an official forecast.
-Preserve the live/synthetic boundary and update the relevant test document
-when behavior changes.
+Keep live provider data separate from admin-only synthetic simulations.
 
 ## Completed backend work
 
 - Added production-oriented User, Household, and SOS incident schemas.
-- Added JWT registration, login, and protected current-user authentication.
+- Added JWT authentication for administrator access and protected admin APIs.
 - Added bcrypt password hashing and role-based responder/admin authorization.
-- Added protected AI chat endpoint with rolling `memorySummary` updates.
+- Added public AI chat with optional signed-in admin context and request limiting.
 - Added guest SOS reporting without creating guest user accounts.
 - Added SOS emergency types, location/contact validation, and incident status handling.
 - Added automatic deletion of resolved SOS incidents 24 hours after resolution using
@@ -58,10 +40,13 @@ when behavior changes.
   optional backend enhancement for exact weather readings, regional markers,
   weather tiles, and ML feature enrichment; the map does not depend on it.
 - Added server-side OpenWeather tile proxying and regional weather point readings.
-- Cyclone overlays use current GDACS tropical-cyclone events only. If the live
-  provider is unavailable or has no active/forming events, no cyclone is shown.
-  The API distinguishes `unavailable` from `no_current_events`; a blank map
-  during provider failure does not prove that no cyclone exists.
+- Cyclone overlays use GDACS tropical-cyclone events for the India region,
+  including events ended within the last 14 days. The shared user/admin Windy
+  map labels active, upcoming, and recent events separately and includes a
+  live-analysis panel for provider status and current local weather/flood-risk
+  proxy telemetry at a selected reported position. It does not claim that
+  proxy telemetry is a cyclone-impact forecast. Provider failure is distinct
+  from an available feed with no current or recent events.
 - Admin simulation supports custom 2–20 waypoint global routes with
   date-line-aware interpolation. Only the track is global: impacts remain
   Odisha-district synthetic proxies plus synthetic state context.
@@ -76,8 +61,12 @@ when behavior changes.
 ## Frontend features
 
 - Responsive navigation: compact mobile menu and full tablet/desktop navigation.
-- Scrollable responsive cards for guidelines, help requests, login, registration, and
-  the authenticated AI assistant.
+- Scrollable responsive cards for guidelines, help requests, admin sign-in,
+  notifications, and the public AI assistant.
+- Browser speech recognition for voice questions and speech synthesis for
+  reading assistant answers when supported.
+- Notification close controls that dismiss notices for signed-in administrators
+  and remember dismissals on public guest browsers.
 - Weather map controls with temperature, rain, wind, cloud, and cyclone layers.
 - An admin Live cyclone map navigation item that uses the same live map
   component as the user view; simulated tracks are never injected into it.
@@ -85,6 +74,10 @@ when behavior changes.
   not create citizen reports or mutate rescue-center records.
 - Simulation restores the last selected run when returning from another
   admin view. Its synthetic clock advances only when an admin presses **Step**.
+- Starting a new simulation preserves prior runs. Owner-scoped run history is
+  paged; each loaded run can be viewed, downloaded as a complete synthetic
+  evidence JSON (including all persisted hours), or individually deleted with
+  its timesteps and archived PDFs. Audit events are retained.
 - Simulation maps can show reference-only open/limited rescue-center records
   from the live registry; an empty registry is shown as empty, not filled with
   demo records.
@@ -106,26 +99,58 @@ The frontend uses Windy as the primary map provider. Set
 OpenWeather may remain unset when only the Windy map is needed; weather-
 dependent backend features will report unavailable instead of fabricating data.
 
-Grounded chat is retrieval-only until an approved provider is configured. To enable
-Google Gemini, set `GOOGLE_GEMINI_API_KEY` (or `GEMINI_API_KEY` /
+The public assistant answers cached questions without a provider. Other general
+questions are sent to the configured LLM; answers are labeled as general AI
+unless grounded in an approved document. If no provider is configured or it
+fails, the assistant explains why it could not answer. To enable grounded
+answers from an approved document, set
+`GOOGLE_GEMINI_API_KEY` (or `GEMINI_API_KEY` /
 `GOOGLE_API_KEY`) and optionally `GOOGLE_GEMINI_MODEL`. A legacy `LLM_API_KEY`
 is treated as a Gemini key only when `LLM_API_URL` is empty.
 When Gemini is configured, the grounded-chat service tries the configured model
 first and then its supported fallback model list. Successful chat responses
 identify the provider and model without exposing credentials.
-Common emergency questions are answered by the in-process FAQ cache before the
-controller loads the user or approved RAG documents from MongoDB. Cache matches
-use normalized word boundaries to avoid accidental substring matches; unmatched
-questions continue through authenticated user lookup, approved-document
-retrieval, and Gemini grounding.
+Common emergency questions are answered by the in-process FAQ cache before
+approved documents are retrieved. Cache matches use normalized word boundaries
+to avoid accidental substring matches. Chat requests are limited to 30 per
+client per 15 minutes.
 Alternatively, set `LLM_API_URL`, `LLM_API_KEY`, `LLM_MODEL`,
 `LLM_TIMEOUT_MS`, and `LLM_MAX_TOKENS` in the backend environment. The backend sends
 only redacted, approved chunks to that endpoint and returns an explicit provider
 status when it is unavailable.
 
-For local testing only, `ALLOW_ADMIN_REGISTRATION=true` grants accounts selecting
-the admin account type immediate admin access. Set it to `false` before hosting;
-production admin approval should be restored.
+### Administrator authentication
+
+Set these **server-only** variables in `Backend\server\.env` for local testing
+and in Render for production:
+
+```env
+NODE_ENV=production
+BOOTSTRAP_ADMIN_EMAIL=your-admin-email
+BOOTSTRAP_ADMIN_PASSWORD=use-a-new-random-secret-of-at-least-16-characters
+```
+
+For the first production startup, set `BOOTSTRAP_ADMIN_EMAIL` to the intended
+initial administrator and set `BOOTSTRAP_ADMIN_PASSWORD` to a new random
+password. The backend hashes it and creates or promotes that account as
+approved. After the first successful startup, remove both bootstrap variables
+from Render; the bootstrap marker prevents later restarts from resetting the
+password. Do not expose the admin password in Vercel, frontend variables,
+source, or screenshots. Only existing admins can sign in; public users do not
+need accounts for normal application features.
+
+Password registration remains disabled in production. The legacy registration
+and phone-verification APIs are not part of the public user experience.
+
+The frontend needs:
+
+```env
+VITE_API_URL=https://your-backend-host/api
+```
+
+On Render, set `CORS_ORIGINS` to the exact Vercel origin (for example
+`https://geo-sentinel-rust.vercel.app`) plus any origins that must remain
+allowed. Keep the `/api` suffix in `VITE_API_URL`.
 
 Local help-request images are written to `Backend\server\uploads` during development.
 Only the generated file path and metadata are stored in MongoDB. For production,
@@ -173,15 +198,19 @@ npm start
 
 Set `MONGO_URI` in `Backend\server\.env` before using report endpoints. The API
 health check is available at `http://localhost:5000/api/health`. Set a long
-random `JWT_SECRET` in the same file before using `/api/auth/register` or
-`/api/auth/login`.
+random `JWT_SECRET` in the same file before using administrator sign-in.
 
 Authentication endpoints:
 
-- `POST /api/auth/register`
-- `POST /api/auth/login`
+- `POST /api/auth/login` for approved administrators only
+- `POST /api/auth/google` for existing administrators only
+- `POST /api/auth/register` is disabled unless explicitly enabled in development
+- `POST /api/auth/phone/send-otp` with a short-lived phone-verification token
+- `POST /api/auth/phone/verify-otp` with a short-lived phone-verification token
 - `GET /api/auth/me` with a `Bearer` token
-- `POST /api/chat/message` with a `Bearer` token and `{ "message": "..." }`
+- `GET /api/admin/users` and `PATCH /api/admin/users/:id/approval` for admins
+- `GET /api/admin/verifications` and `PATCH /api/admin/verifications/:id` for admins
+- `POST /api/chat/message` with `{ "message": "..." }` (optional admin bearer token)
 - `POST /api/sos/guest` for guest emergency reports
 - `PATCH /api/sos/:id/resolve` for authenticated admins/responders
 - `POST /api/reports` for guest or authenticated multipart help reports
@@ -207,8 +236,12 @@ Authentication endpoints:
 - `GET /api/simulation/runs` for admins
 - `GET /api/simulation/runs/:id` for admins
 - `GET /api/simulation/runs/:id/report` for admins
+- `DELETE /api/simulation/runs/:id` for the owning admin; removes the run,
+  timesteps, archived PDFs, and its scenario only when no other run uses it
 - `GET /api/simulation/runs/:id/reports` to list archived PDF metadata
 - `POST /api/simulation/runs/:id/reports` to store a PDF from recorded hours
+- `DELETE /api/simulation/runs/:id/reports/:reportId` for the owning admin to
+  delete one archived PDF without deleting its run or timesteps
 - `GET /api/simulation/runs/:id/reports/:reportId/pdf` to preview a stored PDF;
   pass `?download=1` for attachment disposition
 - `POST /api/simulation/runs/:id/step` for admins
@@ -242,6 +275,10 @@ From the repository root, run:
 ```powershell
 python scripts\start_local.py
 ```
+
+The local launcher verifies the GeoSentinel backend and frontend before reusing
+them. If another app occupies the default ports, it selects free local ports
+and points the launched frontend at the selected GeoSentinel API.
 
 This starts the Express backend, FastAPI service, and Vite frontend together.
 Press `Ctrl+C` once to stop all three processes. Validate the Kaggle archive

@@ -30,54 +30,54 @@ export default class Login extends Component {
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to log in')
-      this.props.onSuccess(data)
+      this.props.onAuthResult(data)
     } catch (error) {
       this.setState({ error: error.message })
     } finally {
       this.setState({ isSubmitting: false })
     }
+  }
 
-    requestReset = async (event) => {
-      event.preventDefault()
-      this.setState({ error: '', success: '', isSubmitting: true })
-      try {
-        const response = await fetch(`${API_URL}/auth/request-password-reset`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: this.state.email }),
-        })
-        const data = await response.json()
-        if (!response.ok) throw new Error(data.error || 'Unable to request password reset')
-        this.setState({
-          success: data.devResetToken
-            ? `Development reset token: ${data.devResetToken}`
-            : data.message,
-          resetToken: data.devResetToken || this.state.resetToken,
-        })
-      } catch (error) {
-        this.setState({ error: error.message })
-      } finally {
-        this.setState({ isSubmitting: false })
-      }
+  requestReset = async (event) => {
+    event.preventDefault()
+    this.setState({ error: '', success: '', isSubmitting: true })
+    try {
+      const response = await fetch(`${API_URL}/auth/request-password-reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: this.state.email }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to request password reset')
+      this.setState({
+        success: data.devResetToken
+          ? `Development reset token: ${data.devResetToken}`
+          : data.message,
+        resetToken: data.devResetToken || this.state.resetToken,
+      })
+    } catch (error) {
+      this.setState({ error: error.message })
+    } finally {
+      this.setState({ isSubmitting: false })
     }
+  }
 
-    resetPassword = async (event) => {
-      event.preventDefault()
-      this.setState({ error: '', success: '', isSubmitting: true })
-      try {
-        const response = await fetch(`${API_URL}/auth/reset-password`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: this.state.resetToken, password: this.state.resetPassword }),
-        })
-        const data = await response.json()
-        if (!response.ok) throw new Error(data.error || 'Unable to reset password')
-        this.setState({ success: data.message, forgotMode: false, resetPassword: '' })
-      } catch (error) {
-        this.setState({ error: error.message })
-      } finally {
-        this.setState({ isSubmitting: false })
-      }
+  resetPassword = async (event) => {
+    event.preventDefault()
+    this.setState({ error: '', success: '', isSubmitting: true })
+    try {
+      const response = await fetch(`${API_URL}/auth/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: this.state.resetToken, password: this.state.resetPassword }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to reset password')
+      this.setState({ success: data.message, forgotMode: false, resetPassword: '' })
+    } catch (error) {
+      this.setState({ error: error.message })
+    } finally {
+      this.setState({ isSubmitting: false })
     }
   }
 
@@ -109,8 +109,8 @@ export default class Login extends Component {
     }
     return (
       <form className="auth-form" onSubmit={this.submit}>
-        <p>Use your email address or phone number to continue.</p>
-        <label htmlFor="login-identifier">Email or phone</label>
+        <p>Administrator access only. Public safety information and the AI assistant are available without signing in.</p>
+        <label htmlFor="login-identifier">Administrator email</label>
         <input
           id="login-identifier"
           type="text"

@@ -166,7 +166,7 @@ export default function SimulationWorkspace({ token }) {
     setStoredReports([])
     setTimelineIndex(-1)
     setPdfPreviewUrl('')
-    setMessage('Configure the route and scenario, then create a new isolated run.')
+    setMessage('The previous run remains saved in run history. Configure a new scenario and create another isolated run.')
   }
 
   const addRoutePoint = (point) => {
@@ -484,6 +484,80 @@ export default function SimulationWorkspace({ token }) {
     }
   }
 
+  const deleteStoredPdf = async (report) => {
+    if (!run) return
+    const confirmed = window.confirm(`Permanently delete the archived PDF "${report.fileName}"? The simulation run and its saved hours will remain.`)
+    if (!confirmed) return
+    setBusy(true)
+    try {
+      const response = await fetch(`${API_URL}/simulation/runs/${run._id}/reports/${report._id}`, {
+        method: 'DELETE',
+        headers,
+      })
+      const data = await response.json()
+      if (!response.ok && !data.deleted) throw new Error(data.error || 'Unable to delete stored PDF report')
+      setStoredReports((current) => current.filter((storedReport) => storedReport._id !== report._id))
+      if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl)
+      setPdfPreviewUrl('')
+      setMessage(data.auditError || `Archived PDF "${report.fileName}" deleted. The simulation run and its saved hours remain.`)
+    } catch (error) {
+      setMessage(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const downloadRun = async (savedRun) => {
+    setBusy(true)
+    try {
+      const response = await fetch(`${API_URL}/simulation/runs/${savedRun._id}/report`, { headers })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to download simulation run')
+      downloadFile(
+        `${savedRun._id}-simulation-evidence.json`,
+        JSON.stringify(data, null, 2),
+        'application/json',
+      )
+      setMessage(`Downloaded all persisted evidence for ${savedRun.scenario?.name || 'the selected run'}.`)
+    } catch (error) {
+      setMessage(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const deleteRun = async (savedRun) => {
+    const confirmed = window.confirm(
+      `Permanently delete "${savedRun.scenario?.name || 'this simulation'}" and its saved hours and PDF reports? This cannot be undone.`,
+    )
+    if (!confirmed) return
+    setBusy(true)
+    try {
+      const response = await fetch(`${API_URL}/simulation/runs/${savedRun._id}`, {
+        method: 'DELETE',
+        headers,
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to delete simulation run')
+      setSavedRuns((current) => current.filter((item) => item._id !== savedRun._id))
+      if (run?._id === savedRun._id) {
+        rememberSelectedRun(null)
+        setRun(null)
+        setScenario(DEFAULT_SCENARIO)
+        setSteps([])
+        setStoredReports([])
+        setTimelineIndex(-1)
+        if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl)
+        setPdfPreviewUrl('')
+      }
+      setMessage('Simulation run, saved hours, and archived PDF reports deleted.')
+    } catch (error) {
+      setMessage(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <section className="simulation-workspace" aria-labelledby="simulation-title">
       <div className="simulation-banner">
@@ -498,13 +572,25 @@ export default function SimulationWorkspace({ token }) {
         <div className="simulation-run-history">
           <div>
             <strong>Saved cyclone runs</strong>
-            <span>Load any saved run to review every stored hour and archived PDF.</span>
+            <span>Starting a new run keeps these records. View, export, or delete an individual run.</span>
           </div>
           <select aria-label="Saved simulation runs" value={run?._id || ''} onChange={(event) => event.target.value && loadRun(event.target.value)} disabled={busy}>
             <option value="">Select a saved run</option>
             {savedRuns.map((savedRun) => <option key={savedRun._id} value={savedRun._id}>{savedRun.scenario?.name || 'Scenario'} · H{savedRun.sequence} · {savedRun.status}</option>)}
           </select>
           {hasMoreRuns && <button type="button" onClick={() => loadRuns({ cursor: runCursor, append: true }).catch((error) => setMessage(error.message))} disabled={busy}>Load older runs</button>}
+          <div className="simulation-run-list" aria-label="Saved simulation run actions">
+            {savedRuns.length === 0
+              ? <span>No saved simulation runs yet.</span>
+              : savedRuns.map((savedRun) => (
+                <div className="simulation-run-item" key={savedRun._id}>
+                  <span><strong>{savedRun.scenario?.name || 'Scenario'}</strong> · H{savedRun.sequence} · {savedRun.status}</span>
+                  <button type="button" onClick={() => loadRun(savedRun._id)} disabled={busy} aria-label={`View ${savedRun.scenario?.name || 'simulation'} run`}>View</button>
+                  <button type="button" onClick={() => downloadRun(savedRun)} disabled={busy} aria-label={`Download ${savedRun.scenario?.name || 'simulation'} run`}>Download</button>
+                  <button type="button" onClick={() => deleteRun(savedRun)} disabled={busy} aria-label={`Delete ${savedRun.scenario?.name || 'simulation'} run`}>Delete</button>
+                </div>
+              ))}
+          </div>
         </div>
         <div className="simulation-actions">
           {!run
@@ -676,6 +762,7 @@ export default function SimulationWorkspace({ token }) {
                   </div>
                   <button type="button" onClick={() => fetchStoredPdf(report)} disabled={busy}>View PDF</button>
                   <button type="button" onClick={() => fetchStoredPdf(report, true)} disabled={busy}>Download PDF</button>
+                  <button type="button" onClick={() => deleteStoredPdf(report)} disabled={busy}>Delete PDF</button>
                 </div>
               ))}
             {pdfPreviewUrl && (

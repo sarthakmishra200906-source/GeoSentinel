@@ -209,7 +209,7 @@
 
           storms.forEach((storm) => {
             if (!storm.coordinates || !storm.coordinates.length) return
-            const eye = storm.coordinates[0]
+            const eye = storm.coordinates[storm.coordinates.length - 1]
             if (!eye || !Array.isArray(eye) || eye.length < 2) return
 
             // 1. Forecast / past track polyline
@@ -258,6 +258,7 @@
             const popupContent = `
               <div class="cyclone-popup-content">
                 <div class="cyclone-popup-header">🌀 ${cleanName}</div>
+                <div class="cyclone-popup-row"><b>Status:</b> ${(storm.status || 'Unconfirmed').replaceAll('_', ' ')}</div>
                 <div class="cyclone-popup-row"><b>Category:</b> ${storm.category || 'Tropical Storm'}</div>
                 <div class="cyclone-popup-row"><b>Max Wind:</b> ${storm.maxWindKmh || '—'} km/h</div>
                 ${storm.pressureHpa ? `<div class="cyclone-popup-row"><b>Central Pressure:</b> ${storm.pressureHpa} hPa</div>` : ''}

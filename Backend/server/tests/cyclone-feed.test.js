@@ -53,6 +53,54 @@ test('cyclone feed returns current India-region tracks and preserves line geomet
   assert.equal(result.live, true)
   assert.equal(result.tracks[0].status, 'ACTIVE_LIVE_GDACS')
   assert.deepEqual(result.tracks[0].coordinates, [[19, 86], [20, 87]])
+  assert.equal(result.tracks[0].locationType, 'LineString')
+})
+
+test('cyclone feed retains recent ended events with an explicit historical status', async () => {
+  const recentEvent = currentEvent({
+    fromdate: '2026-11-01T00:00:00',
+    todate: '2026-11-03T06:00:00',
+  })
+  recentEvent.geometry = { type: 'Point', coordinates: [80.2, 15.8] }
+  const feed = createCycloneFeed({
+    now: () => NOW,
+    fetchImpl: async () => providerResponse([
+      recentEvent,
+      currentEvent({
+        eventid: 41,
+        fromdate: '2026-10-01T00:00:00',
+        todate: '2026-10-03T06:00:00',
+      }),
+    ]),
+  })
+
+  const result = await feed.getCurrentEvents()
+  assert.equal(result.available, true)
+  assert.equal(result.live, false)
+  assert.equal(result.status, 'recent_events')
+  assert.equal(result.recentCount, 1)
+  assert.equal(result.tracks[0].status, 'RECENT_GDACS')
+  assert.equal(result.tracks[0].validUntil, '2026-11-03T06:00:00')
+  assert.equal(result.tracks[0].locationType, 'Point')
+  assert.deepEqual(result.tracks[0].coordinates, [[15.8, 80.2]])
+})
+
+test('cyclone feed marks future regional events as upcoming rather than active', async () => {
+  const feed = createCycloneFeed({
+    now: () => NOW,
+    fetchImpl: async () => providerResponse([
+      currentEvent({
+        fromdate: '2026-11-16T00:00:00',
+        todate: '2026-11-18T00:00:00',
+      }),
+    ]),
+  })
+
+  const result = await feed.getCurrentEvents()
+  assert.equal(result.live, false)
+  assert.equal(result.status, 'upcoming_events')
+  assert.equal(result.upcomingCount, 1)
+  assert.equal(result.tracks[0].status, 'UPCOMING_GDACS')
 })
 
 test('cyclone feed reports provider failure and deduplicates concurrent requests', async () => {

@@ -20,6 +20,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 export default function AdminDashboard({ token, activeSection = 'overview' }) {
   const [guidelines, setGuidelines] = useState([])
   const [verifications, setVerifications] = useState([])
+  const [userApprovals, setUserApprovals] = useState([])
   const [message, setMessage] = useState('')
   const [centers, setCenters] = useState([])
   const [helpReports, setHelpReports] = useState([])
@@ -67,10 +68,11 @@ export default function AdminDashboard({ token, activeSection = 'overview' }) {
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token])
   const load = useCallback(async () => {
-    const [guidelineResponse, verificationResponse, centersResponse, reportsResponse, auditResponse, healthResponse, weatherResponse, stateResponse] =
+    const [guidelineResponse, verificationResponse, userApprovalResponse, centersResponse, reportsResponse, auditResponse, healthResponse, weatherResponse, stateResponse] =
       await Promise.all([
         fetch(`${API_URL}/admin/guidelines`, { headers }),
         fetch(`${API_URL}/admin/verifications`, { headers }),
+        fetch(`${API_URL}/admin/users`, { headers }),
         fetch(`${API_URL}/rescue-centers`, { headers }),
         fetch(`${API_URL}/reports?limit=50`, { headers }),
         fetch(`${API_URL}/admin/audit`, { headers }),
@@ -78,10 +80,11 @@ export default function AdminDashboard({ token, activeSection = 'overview' }) {
         fetch(`${API_URL}/weather/dashboard`),
         fetch(`${API_URL}/weather/states`),
       ])
-    if (!guidelineResponse.ok || !verificationResponse.ok || !reportsResponse.ok || !auditResponse.ok)
+    if (!guidelineResponse.ok || !verificationResponse.ok || !userApprovalResponse.ok || !reportsResponse.ok || !auditResponse.ok)
       throw new Error('Unable to load admin data')
     setGuidelines(await guidelineResponse.json())
     setVerifications(await verificationResponse.json())
+    setUserApprovals(await userApprovalResponse.json())
     setCenters(await centersResponse.json())
     const reportData = await reportsResponse.json()
     setHelpReports(Array.isArray(reportData) ? reportData : reportData.reports)
@@ -286,6 +289,18 @@ export default function AdminDashboard({ token, activeSection = 'overview' }) {
       body: JSON.stringify({ status }),
     })
     if (!response.ok) throw new Error('Unable to update verification')
+    await load()
+  }
+
+  const approveUser = async (id) => {
+    const response = await fetch(`${API_URL}/admin/users/${id}/approval`, {
+      method: 'PATCH',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isApproved: true }),
+    })
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.error || 'Unable to approve user')
+    setMessage(`Approved ${data.email}.`)
     await load()
   }
 
@@ -847,18 +862,51 @@ export default function AdminDashboard({ token, activeSection = 'overview' }) {
       ))}
       {!guidelines.length && <p>No guideline documents uploaded yet.</p>}
 
-      <h3>Admin Verification Requests</h3>
+      </>}
+
+      {activeSection === 'users' && <>
+      <div id="admin-users"><h3>Pending user approvals</h3></div>
+      {userApprovals.map((user) => (
+        <article className="admin-approval-card" key={user._id}>
+          <strong>{user.name || 'New user'}</strong> · {user.email}
+          <p>
+            Email: {user.isEmailVerified ? 'verified' : 'not verified'} ·
+            Phone: {user.isPhoneVerified ? 'verified' : 'not verified'} ·
+            Phone number: {user.phone || 'not provided'}
+          </p>
+          <button
+            type="button"
+            disabled={!user.isEmailVerified || !user.isPhoneVerified}
+            onClick={() => approveUser(user._id).catch((error) => setMessage(error.message))}
+          >
+            Approve user
+          </button>
+        </article>
+      ))}
+      {!userApprovals.length && <p>No user accounts are waiting for approval.</p>}
+
+      <h3>Admin access requests</h3>
       {verifications.map((item) => (
-        <p key={item._id}>
-          {item.user?.name} ({item.governmentIdReference}){' '}
-          <button type="button" onClick={() => updateVerification(item._id, 'approved')}>
+        <article className="admin-approval-card" key={item._id}>
+          <strong>{item.user?.name || 'Applicant'}</strong> · {item.user?.email}
+          <p>
+            Government ID reference: {item.governmentIdReference} ·
+            Email: {item.user?.isEmailVerified ? 'verified' : 'not verified'} ·
+            Phone: {item.user?.isPhoneVerified ? 'verified' : 'not verified'}
+          </p>
+          <button
+            type="button"
+            disabled={!item.user?.isEmailVerified || !item.user?.isPhoneVerified}
+            onClick={() => updateVerification(item._id, 'approved').catch((error) => setMessage(error.message))}
+          >
             Approve
           </button>{' '}
-          <button type="button" onClick={() => updateVerification(item._id, 'rejected')}>
+          <button type="button" onClick={() => updateVerification(item._id, 'rejected').catch((error) => setMessage(error.message))}>
             Reject
           </button>
-        </p>
+        </article>
       ))}
+      {!verifications.length && <p>No admin access requests are waiting for review.</p>}
       </>}
 
       {activeSection === 'audit' && <div id="admin-audit" className="audit-panel">

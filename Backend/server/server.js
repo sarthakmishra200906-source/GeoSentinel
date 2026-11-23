@@ -14,9 +14,11 @@ import predictionRoutes from './routes/prediction.js'
 import notificationRoutes from './routes/notifications.js'
 import simulationRoutes from './routes/simulation.js'
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js'
+import { bootstrapAdmin, ensureOptionalPhoneIndex, ensureProductionAdmin } from './services/bootstrapAdmin.js'
 
 const app = express()
 const port = Number(process.env.PORT || 5000)
+app.set('trust proxy', 1)
 const allowedOrigins = (
   process.env.CORS_ORIGINS ||
   'http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000'
@@ -47,7 +49,9 @@ app.use(express.json())
 
 app.get('/api/health', (_request, response) => {
   response.json({
+    service: 'geosentinel-api',
     status: 'ok',
+    capabilities: { guestChat: true },
     database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
     weather: process.env.OPENWEATHER_API_KEY ? 'configured' : 'not_configured',
     requestId: response.getHeader('x-request-id'),
@@ -84,6 +88,9 @@ async function startServer() {
     await mongoose.connect(process.env.MONGO_URI, {
       dbName: process.env.MONGO_DB_NAME || 'resq_ai_db',
     })
+    await ensureOptionalPhoneIndex()
+    await bootstrapAdmin()
+    await ensureProductionAdmin()
     console.log('Connected to MongoDB')
   } else {
     console.warn('MONGO_URI is not configured; database routes will not be available')

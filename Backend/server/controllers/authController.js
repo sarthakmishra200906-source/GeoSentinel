@@ -2,25 +2,86 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import crypto from 'node:crypto'
 import nodemailer from 'nodemailer'
+import { OAuth2Client } from 'google-auth-library'
+import twilio from 'twilio'
 import User from '../models/User.js'
 import AdminVerification from '../models/AdminVerification.js'
 
-function createToken(user) {
+const googleClient = new OAuth2Client()
+
+function createToken(user, tokenType = 'access', expiresIn = process.env.JWT_EXPIRES_IN || '7d') {
   if (!process.env.JWT_SECRET) {
     const error = new Error('JWT_SECRET is not configured')
     error.statusCode = 500
     throw error
   }
 
-  return jwt.sign({ userId: user._id.toString(), role: user.role }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
+  return jwt.sign({ userId: user._id.toString(), role: user.role, tokenType }, process.env.JWT_SECRET, {
+    expiresIn,
   })
 }
 
+function phoneVerificationToken(user) {
+  return createToken(user, 'phone-verification', '10m')
+}
+
 function publicUser(user) {
-  const result = user.toObject()
+  const result = user.toObject ? user.toObject() : { ...user }
   delete result.password
+  delete result.googleId
+  delete result.isBootstrapAdmin
+  delete result.phoneVerificationPhone
+  delete result.phoneVerificationLastSentAt
+  delete result.passwordResetTokenHash
+  delete result.passwordResetExpiresAt
   return result
+}
+
+function normalizePhone(phone) {
+  const normalized = String(phone || '').trim().replace(/[\s()-]/g, '')
+  if (!/^\+[1-9]\d{7,14}$/.test(normalized)) {
+    const error = new Error('Phone number must use international E.164 format, for example +919876543210')
+    error.statusCode = 400
+    throw error
+  }
+  return normalized
+}
+
+function authResult(user, phoneToVerify = '') {
+  if (user.isPhoneVerified === false) {
+    return {
+      status: 'phone_verification_required',
+      verificationToken: phoneVerificationToken(user),
+      phoneToVerify,
+      user: publicUser(user),
+    }
+  }
+  if (user.isApproved === false) {
+    return { status: 'pending_approval', user: publicUser(user) }
+  }
+  return { status: 'authenticated', token: createToken(user), user: publicUser(user) }
+}
+
+function twilioVerifyService() {
+  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_VERIFY_SERVICE_SID } = process.env
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_VERIFY_SERVICE_SID) return null
+  return twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN).verify.v2.services(TWILIO_VERIFY_SERVICE_SID)
+}
+
+async function ensureAdminVerification(user, reference) {
+  if (typeof reference !== 'string' || !reference.trim() || reference.trim().length > 120) {
+    const error = new Error('governmentIdReference is required and must be at most 120 characters')
+    error.statusCode = 400
+    throw error
+  }
+  await AdminVerification.findOneAndUpdate(
+    { user: user._id },
+    {
+      $set: { governmentIdReference: reference.trim(), status: 'pending', reviewedBy: null, reviewedAt: null, reviewNote: '' },
+      $setOnInsert: { user: user._id },
+    },
+    { upsert: true, new: true, runValidators: true },
+  )
 }
 
 function passwordResetTransport() {
@@ -35,39 +96,57 @@ function passwordResetTransport() {
 
 export async function register(request, response, next) {
   try {
+    if (process.env.NODE_ENV !== 'development' || process.env.ALLOW_PASSWORD_REGISTRATION !== 'true') {
+      response.status(403).json({
+        code: 'GOOGLE_SIGN_IN_REQUIRED',
+        error: 'Password registration is disabled; use Google Sign-In to create an account',
+      })
+      return
+    }
+
     const body = request.body || {}
-    if (typeof body.password !== 'string' || !body.password) {
-      response.status(400).json({ error: 'password is required' })
+    if (
+      typeof body.name !== 'string' ||
+      typeof body.email !== 'string' ||
+      typeof body.password !== 'string' ||
+      body.password.length < 8
+    ) {
+      response.status(400).json({ error: 'name, email, and a password of at least 8 characters are required' })
       return
     }
 
     const requestedRole = body.accountType === 'admin' ? 'admin' : 'user'
-    const directAdminAccess = requestedRole === 'admin' && process.env.ALLOW_ADMIN_REGISTRATION === 'true'
-    if (requestedRole === 'admin' && !directAdminAccess && typeof body.governmentIdReference !== 'string') {
-      response.status(400).json({ error: 'governmentIdReference is required for admin verification' })
+    if (
+      requestedRole === 'admin' &&
+      (typeof body.governmentIdReference !== 'string' ||
+        !body.governmentIdReference.trim() ||
+        body.governmentIdReference.trim().length > 120)
+    ) {
+      response.status(400).json({ error: 'governmentIdReference is required and must be at most 120 characters' })
       return
     }
-
+    const phone = normalizePhone(body.phone)
     const user = await User.create({
-      ...body,
-      role: directAdminAccess ? 'admin' : 'user',
+      name: body.name.trim(),
+      email: body.email.trim().toLowerCase(),
+      phoneVerificationPhone: phone,
+      age: body.age === undefined || body.age === '' ? undefined : Number(body.age),
+      gender: ['Male', 'Female', 'Other'].includes(body.gender) ? body.gender : 'Other',
+      address: typeof body.address === 'string' ? body.address.trim() : '',
+      role: 'user',
+      isEmailVerified: process.env.NODE_ENV === 'development',
+      isPhoneVerified: false,
+      isApproved: false,
       password: await bcrypt.hash(body.password, 12),
     })
-    if (requestedRole === 'admin' && !directAdminAccess) {
-      await AdminVerification.create({
-        user: user._id,
-        governmentIdReference: body.governmentIdReference,
-      })
-    }
-    const token = createToken(user)
+    if (requestedRole === 'admin') await ensureAdminVerification(user, body.governmentIdReference)
     response.status(201).json({
-      token,
-      user: publicUser(user),
-      adminVerification: directAdminAccess ? 'approved-local' : requestedRole === 'admin' ? 'pending' : null,
+      ...authResult(user, phone),
+      adminVerification: requestedRole === 'admin' ? 'pending' : null,
     })
   } catch (error) {
     if (error.code === 11000) {
-      const field = Object.keys(error.keyPattern)[0]
+      const field = Object.keys(error.keyPattern || {})[0] || 'value'
       response.status(409).json({ error: `${field} is already registered` })
       return
     }
@@ -77,7 +156,7 @@ export async function register(request, response, next) {
 
 export async function login(request, response, next) {
   try {
-    const { identifier, password } = request.body
+    const { identifier, password } = request.body || {}
     if (typeof identifier !== 'string' || typeof password !== 'string' || !identifier.trim() || !password) {
       response.status(400).json({ error: 'identifier and password are required' })
       return
@@ -85,16 +164,166 @@ export async function login(request, response, next) {
 
     const user = await User.findOne({
       $or: [{ email: identifier.toLowerCase().trim() }, { phone: identifier.trim() }],
-    }).select('+password')
+    }).select('+password +phoneVerificationPhone')
 
-    if (!user || !(await bcrypt.compare(password, user.password))) {
+    if (!user || !user.password || !(await bcrypt.compare(password, user.password))) {
       response.status(401).json({ error: 'Invalid credentials' })
       return
     }
+    if (user.role !== 'admin') {
+      response.status(403).json({ error: 'Only administrators can sign in' })
+      return
+    }
 
-    const token = createToken(user)
-    response.json({ token, user: publicUser(user) })
+    response.json(authResult(user, user.phoneVerificationPhone || ''))
   } catch (error) {
+    next(error)
+  }
+}
+
+export async function googleLogin(request, response, next) {
+  try {
+    if (!process.env.GOOGLE_CLIENT_ID) {
+      response.status(503).json({ error: 'Google Sign-In is not configured on the server' })
+      return
+    }
+    const { credential, phone } = request.body || {}
+    if (typeof credential !== 'string' || !credential) {
+      response.status(400).json({ error: 'Google credential is required' })
+      return
+    }
+    let payload
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      })
+      payload = ticket.getPayload()
+    } catch {
+      response.status(401).json({ error: 'Google credential is invalid or expired' })
+      return
+    }
+    if (!payload?.email || payload.email_verified !== true || !payload.sub) {
+      response.status(401).json({ error: 'A Google account with a verified email is required' })
+      return
+    }
+
+    const email = payload.email.trim().toLowerCase()
+    let user = await User.findOne({ email }).select('+googleId +phoneVerificationPhone')
+    if (!user) {
+      response.status(403).json({ error: 'Only an existing administrator can sign in' })
+      return
+    }
+    if (user.googleId && user.googleId !== payload.sub) {
+      response.status(409).json({ error: 'This email is already linked to a different Google account' })
+      return
+    }
+    if (user.role !== 'admin') {
+      response.status(403).json({ error: 'Only administrators can sign in' })
+      return
+    }
+    user.googleId = payload.sub
+    user.isEmailVerified = true
+    if (phone && user.isPhoneVerified === false) user.phoneVerificationPhone = normalizePhone(phone)
+    await user.save()
+    response.json(authResult(user, user.phoneVerificationPhone || ''))
+  } catch (error) {
+    if (error.code === 11000) {
+      response.status(409).json({ error: 'The email or phone number is already registered' })
+      return
+    }
+    next(error)
+  }
+}
+
+export async function sendPhoneOtp(request, response, next) {
+  const service = twilioVerifyService()
+  if (!service) {
+    response.status(503).json({ error: 'Phone verification is not configured on the server' })
+    return
+  }
+  let phone
+  try {
+    phone = request.body?.phone
+      ? normalizePhone(request.body.phone)
+      : request.user.phoneVerificationPhone
+    if (!phone) {
+      response.status(400).json({ error: 'An international-format phone number is required' })
+      return
+    }
+    if (request.user.isPhoneVerified !== false) {
+      response.status(409).json({ error: 'This account does not require phone verification' })
+      return
+    }
+    const conflictingUser = await User.findOne({ phone, _id: { $ne: request.user._id } }).select('_id')
+    if (conflictingUser) {
+      response.status(409).json({ error: 'That phone number is already registered' })
+      return
+    }
+    if (
+      request.user.phoneVerificationLastSentAt &&
+      Date.now() - request.user.phoneVerificationLastSentAt.getTime() < 60_000
+    ) {
+      response.status(429).json({ error: 'Wait one minute before requesting another code' })
+      return
+    }
+
+    request.user.phoneVerificationPhone = phone
+    request.user.phoneVerificationLastSentAt = new Date()
+    await request.user.save()
+  } catch (error) {
+    if (error.code === 11000) {
+      response.status(409).json({ error: 'That phone number is already registered' })
+      return
+    }
+    next(error)
+    return
+  }
+  try {
+    await service.verifications.create({ to: phone, channel: 'sms' })
+    response.json({ message: 'Verification code sent' })
+  } catch (error) {
+    console.error('Twilio Verify could not send a code', { code: error.code || 'unknown' })
+    response.status(502).json({ error: 'SMS verification service is unavailable' })
+  }
+}
+
+export async function verifyPhoneOtp(request, response, next) {
+  const service = twilioVerifyService()
+  if (!service) {
+    response.status(503).json({ error: 'Phone verification is not configured on the server' })
+    return
+  }
+  const code = String(request.body?.code || '').trim()
+  const phone = request.user.phoneVerificationPhone
+  if (!phone || !/^\d{4,10}$/.test(code)) {
+    response.status(400).json({ error: 'A valid verification code is required' })
+    return
+  }
+  let check
+  try {
+    check = await service.verificationChecks.create({ to: phone, code })
+  } catch (error) {
+    console.error('Twilio Verify could not verify a code', { code: error.code || 'unknown' })
+    response.status(502).json({ error: 'SMS verification service is unavailable' })
+    return
+  }
+  if (check.status !== 'approved') {
+    response.status(400).json({ error: 'The verification code is invalid or expired' })
+    return
+  }
+  try {
+    request.user.phone = phone
+    request.user.isPhoneVerified = true
+    request.user.phoneVerificationPhone = undefined
+    request.user.phoneVerificationLastSentAt = undefined
+    await request.user.save()
+    response.json(authResult(request.user))
+  } catch (error) {
+    if (error.code === 11000) {
+      response.status(409).json({ error: 'That phone number is already registered' })
+      return
+    }
     next(error)
   }
 }

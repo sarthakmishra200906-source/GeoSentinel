@@ -2,7 +2,15 @@ const GDACS_CYCLONE_URL = 'https://www.gdacs.org/gdacsapi/api/events/geteventlis
 const CACHE_DURATION_MS = 5 * 60 * 1000
 const FAILURE_RETRY_MS = 60 * 1000
 const REQUEST_TIMEOUT_MS = 5000
+const RECENT_EVENT_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
 const INDIA_CYCLONE_BOUNDS = { minLat: -5, maxLat: 35, minLon: 55, maxLon: 105 }
+
+function parseProviderDate(value) {
+  if (!value) return Number.NaN
+  const date = String(value)
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(date)
+  return Date.parse(hasTimezone ? date : `${date}Z`)
+}
 
 function getCoordinates(feature) {
   const geometry = feature?.geometry
@@ -15,21 +23,21 @@ function getCoordinates(feature) {
   return []
 }
 
-function isCurrentIndiaRegionEvent(feature, now) {
+function getEventStatus(feature, now) {
   const properties = feature?.properties || {}
-  const startsAt = Date.parse(properties.fromdate || properties.fromDate || '')
-  const endsAt = Date.parse(properties.todate || properties.toDate || '')
+  const startsAt = parseProviderDate(properties.fromdate || properties.fromDate)
+  const endsAt = parseProviderDate(properties.todate || properties.toDate)
   if (
     !Number.isFinite(startsAt) ||
     !Number.isFinite(endsAt) ||
-    endsAt < now ||
-    startsAt > now + 7 * 24 * 60 * 60 * 1000
+    startsAt > now + 7 * 24 * 60 * 60 * 1000 ||
+    endsAt < now - RECENT_EVENT_RETENTION_MS
   ) {
-    return false
+    return null
   }
   const coordinates = getCoordinates(feature)
   const country = String(properties.country || '').toLowerCase()
-  return (
+  const isIndiaRegion = (
     country.includes('india') ||
     coordinates.some(([longitude, latitude]) => (
       Number.isFinite(Number(latitude)) &&
@@ -40,9 +48,13 @@ function isCurrentIndiaRegionEvent(feature, now) {
       Number(longitude) <= INDIA_CYCLONE_BOUNDS.maxLon
     ))
   )
+  if (!isIndiaRegion) return null
+  if (startsAt > now) return 'UPCOMING_GDACS'
+  if (endsAt < now) return 'RECENT_GDACS'
+  return 'ACTIVE_LIVE_GDACS'
 }
 
-function mapCycloneFeature(feature, index) {
+function mapCycloneFeature(feature, index, status) {
   const properties = feature.properties || {}
   const coordinates = getCoordinates(feature)
     .map(([longitude, latitude]) => [Number(latitude), Number(longitude)])
@@ -56,12 +68,15 @@ function mapCycloneFeature(feature, index) {
     name: name.startsWith('🌀') ? name : `🌀 ${name}`,
     category: properties.alertlevel ? `${properties.alertlevel} Alert Cyclone` : 'Tropical Cyclone',
     ...(Number.isFinite(wind) ? { maxWindKmh: Math.round(wind) } : {}),
-    status: 'ACTIVE_LIVE_GDACS',
+    status,
     basin: properties.country || 'Global Oceans',
     coordinates,
+    locationType: feature.geometry.type,
     source: 'GDACS',
+    reportUrl: properties.url?.report || null,
     validFrom: properties.fromdate || null,
     validUntil: properties.todate || null,
+    lastUpdated: properties.datemodified || null,
   }
 }
 
@@ -81,20 +96,45 @@ export function createCycloneFeed({ fetchImpl = globalThis.fetch, now = Date.now
       if (!response.ok) throw new Error(`GDACS returned HTTP ${response.status}`)
       const data = await response.json()
       const features = Array.isArray(data?.features) ? data.features : []
+      const currentTime = now()
       const tracks = features
-        .filter((feature) => isCurrentIndiaRegionEvent(feature, now()))
-        .map(mapCycloneFeature)
+        .map((feature, index) => {
+          const status = getEventStatus(feature, currentTime)
+          return status ? mapCycloneFeature(feature, index, status) : null
+        })
         .filter(Boolean)
+        .sort((first, second) => {
+          const statusOrder = {
+            ACTIVE_LIVE_GDACS: 0,
+            UPCOMING_GDACS: 1,
+            RECENT_GDACS: 2,
+          }
+          const statusDifference = statusOrder[first.status] - statusOrder[second.status]
+          if (statusDifference !== 0) return statusDifference
+          return parseProviderDate(second.validUntil) - parseProviderDate(first.validUntil)
+        })
         .slice(0, 10)
+      const activeCount = tracks.filter((track) => track.status === 'ACTIVE_LIVE_GDACS').length
+      const upcomingCount = tracks.filter((track) => track.status === 'UPCOMING_GDACS').length
+      const recentCount = tracks.filter((track) => track.status === 'RECENT_GDACS').length
       const fetchedAt = new Date(now()).toISOString()
       cachedResponse = {
         available: true,
-        live: tracks.length > 0,
-        status: tracks.length > 0 ? 'active_events' : 'no_current_events',
+        live: activeCount > 0,
+        status: activeCount > 0
+          ? 'active_events'
+          : upcomingCount > 0
+            ? 'upcoming_events'
+            : recentCount > 0
+              ? 'recent_events'
+              : 'no_current_events',
         source: 'GDACS',
         fetchedAt,
         tracks,
         count: tracks.length,
+        activeCount,
+        upcomingCount,
+        recentCount,
       }
       cachedAt = now()
       return cachedResponse

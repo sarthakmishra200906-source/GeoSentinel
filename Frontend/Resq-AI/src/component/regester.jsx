@@ -1,6 +1,8 @@
 import React, { Component } from 'react'
+import { GoogleLogin } from '@react-oauth/google'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID
 
 export default class Register extends Component {
   state = {
@@ -30,7 +32,7 @@ export default class Register extends Component {
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to create your account')
-      this.props.onSuccess(data)
+      this.props.onAuthResult(data)
     } catch (error) {
       this.setState({ error: error.message })
     } finally {
@@ -40,15 +42,36 @@ export default class Register extends Component {
 
   update = (field) => (event) => this.setState({ [field]: event.target.value })
 
+  googleLogin = (credentialResponse) => {
+    if (!credentialResponse.credential) {
+      this.setState({ error: 'Google did not return a sign-in credential' })
+      return
+    }
+    this.props.onGoogleLogin({
+      credential: credentialResponse.credential,
+      accountType: this.state.accountType,
+      governmentIdReference: this.state.governmentIdReference,
+      phone: this.state.phone,
+    }).catch((error) => this.setState({ error: error.message }))
+  }
+
   render() {
     return (
       <form className="auth-form" onSubmit={this.submit}>
+        {GOOGLE_CLIENT_ID ? (
+          <>
+            <GoogleLogin onSuccess={this.googleLogin} onError={() => this.setState({ error: 'Google Sign-In failed' })} />
+            <p>Google Sign-In is required for new production accounts.</p>
+          </>
+        ) : (
+          <p className="form-note">Production accounts require Google Sign-In. Configure VITE_GOOGLE_CLIENT_ID before deployment; password registration is for local development.</p>
+        )}
         <label htmlFor="register-name">Full name</label>
         <input id="register-name" type="text" value={this.state.name} onChange={this.update('name')} required />
         <label htmlFor="register-email">Email</label>
         <input id="register-email" type="email" value={this.state.email} onChange={this.update('email')} required />
         <label htmlFor="register-phone">Phone</label>
-        <input id="register-phone" type="tel" value={this.state.phone} onChange={this.update('phone')} required />
+        <input id="register-phone" type="tel" placeholder="+919876543210" value={this.state.phone} onChange={this.update('phone')} required />
         <label htmlFor="register-password">Password</label>
         <div className="password-field">
           <input id="register-password" type={this.state.showPassword ? 'text' : 'password'} value={this.state.password} onChange={this.update('password')} required />
@@ -67,13 +90,13 @@ export default class Register extends Component {
         <label htmlFor="register-account-type">Account type</label>
         <select id="register-account-type" value={this.state.accountType} onChange={this.update('accountType')}>
           <option value="user">User</option>
-          <option value="admin">Admin access (local testing)</option>
+          <option value="admin">Request admin access</option>
         </select>
         {this.state.accountType === 'admin' && (
           <>
             <label htmlFor="register-government-id">Government ID reference</label>
             <input id="register-government-id" type="text" value={this.state.governmentIdReference} onChange={this.update('governmentIdReference')} />
-            <p className="form-note">Local testing currently grants admin access immediately. Disable this before hosting.</p>
+            <p className="form-note">Admin access stays pending until an existing admin verifies and approves this request.</p>
           </>
         )}
         <button className="form-submit" type="submit" disabled={this.state.isSubmitting}>

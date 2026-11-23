@@ -98,7 +98,7 @@ def main() -> int:
     registration_body = {
         "name": "Local Smoke User",
         "email": f"smoke-{int(time.time())}@example.com",
-        "phone": f"9{int(time.time()) % 1000000000:09d}",
+        "phone": f"+919{int(time.time()) % 1000000000:09d}",
         "password": "LocalSmokePassword!123",
         "age": 30,
         "gender": "Other",
@@ -110,10 +110,13 @@ def main() -> int:
         body=json.dumps(registration_body).encode(),
         headers={"Content-Type": "application/json"},
     )
-    ordinary_token = None
-    if registration[0] == 201:
-        ordinary_token = json.loads(registration[2]).get("token")
-    ordinary_headers = {"Authorization": f"Bearer {ordinary_token}"} if ordinary_token else {}
+    registration_payload = json.loads(registration[2]) if registration[2] else {}
+    verification_token = registration_payload.get("verificationToken")
+    verification_headers = (
+        {"Authorization": f"Bearer {verification_token}"}
+        if verification_token
+        else {}
+    )
 
     dashboard_result = json_request(f"{BACKEND}/api/weather/dashboard")
     states_result = json_request(f"{BACKEND}/api/weather/states")
@@ -186,24 +189,35 @@ def main() -> int:
             == 401,
         ),
         check(
-            "ordinary user registration works for authorization test",
-            lambda: registration[0] == 201 and bool(ordinary_token),
+            "registration is disabled or returns a phone-verification-only session",
+            lambda: (
+                registration[0] == 403
+                and registration_payload.get("code") == "GOOGLE_SIGN_IN_REQUIRED"
+            )
+            or (
+                registration[0] == 201
+                and registration_payload.get("status") == "phone_verification_required"
+                and bool(verification_token)
+                and not registration_payload.get("token")
+            ),
         ),
         check(
-            "ordinary users cannot access admin guidelines",
-            lambda: ordinary_token is not None
-            and request(f"{BACKEND}/api/admin/guidelines", headers=ordinary_headers)[0] == 403,
+            "phone-verification tokens cannot access protected APIs",
+            lambda: (
+                bool(verification_token)
+                and request(
+                    f"{BACKEND}/api/auth/me", headers=verification_headers
+                )[0]
+                == 401
+            )
+            or (
+                registration[0] == 403
+                and registration_payload.get("code") == "GOOGLE_SIGN_IN_REQUIRED"
+            ),
         ),
         check(
-            "ordinary users cannot mutate rescue centers",
-            lambda: ordinary_token is not None
-            and request(
-                f"{BACKEND}/api/rescue-centers",
-                method="POST",
-                body=b"{}",
-                headers={**ordinary_headers, "Content-Type": "application/json"},
-            )[0]
-            == 403,
+            "admin user list rejects missing authentication",
+            lambda: request(f"{BACKEND}/api/admin/users")[0] == 401,
         ),
         check(
             "invalid report is rejected",

@@ -12,6 +12,8 @@ const entries = [
   {
     keywords: [
       'hi',
+      'hi there',
+      'hi resq',
       'hii',
       'hiii',
       'hiiii',
@@ -19,13 +21,14 @@ const entries = [
       'helloo',
       'hey',
       'heyy',
+      'howdy',
       'namaste',
       'good morning',
       'good evening',
       'start',
     ],
     answer:
-      'Hello! I am the Resq-AI Disaster Assistance Guide. Ask me about flood precautions, cyclone readiness, lightning or heatwave safety, first aid, or how to find nearby rescue centers. If you are in immediate physical danger, please contact local emergency services right away.',
+      'Hi! I’m Resq-AI, your disaster-safety assistant. Ask me about floods, cyclones, earthquakes, landslides, first aid, or emergency preparedness. I can share general safety guidance and answer from approved documents when available. I cannot issue official warnings or replace emergency services.',
   },
 
   // 2. Capabilities & Platform Help
@@ -206,4 +209,42 @@ export function getCachedFaqAnswer(message) {
     ...entry,
     source: FAQ_SOURCE,
   }
+}
+
+export function getSafeGeneralSafetyFallback(message) {
+  if (typeof message !== 'string' || !message.trim()) return null
+  const normalized = normalizeMessage(message)
+  const words = normalized.split(/\s+/).filter((w) => w.length > 2)
+
+  let bestEntry = null
+  let maxScore = 0
+
+  for (const entry of entries) {
+    let score = 0
+    for (const keyword of entry.keywords) {
+      const normKey = normalizeMessage(keyword)
+      if (normalized.includes(normKey)) {
+        score += normKey.split(/\s+/).length * 2
+      } else {
+        const keyWords = normKey.split(/\s+/)
+        const matches = keyWords.filter((kw) => words.includes(kw)).length
+        if (matches === keyWords.length && keyWords.length > 0) {
+          score += keyWords.length
+        }
+      }
+    }
+    if (score > maxScore) {
+      maxScore = score
+      bestEntry = entry
+    }
+  }
+
+  if (bestEntry && maxScore >= 2) {
+    return {
+      answer: bestEntry.answer,
+      source: FAQ_SOURCE,
+      topic: bestEntry.keywords[0],
+    }
+  }
+  return null
 }
