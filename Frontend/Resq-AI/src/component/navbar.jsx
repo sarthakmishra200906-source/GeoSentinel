@@ -1,5 +1,6 @@
 import React, { Component } from 'react'
 import Login from './login'
+import Register from './regester'
 import NavigationCard from './NavigationCard'
 import PhoneVerification from './PhoneVerification'
 
@@ -159,6 +160,20 @@ export default class Navbar extends Component {
       return (
         <NavigationCard title="Admin sign-in" onClose={this.closeCard}>
           <Login onAuthResult={this.handleAuthResult} />
+          <p className="auth-foot">
+            Need an admin account?{' '}
+            <button type="button" className="text-link-button" onClick={() => this.openCard('register')}>
+              Request access
+            </button>
+          </p>
+        </NavigationCard>
+      )
+    }
+
+    if (activeCard === 'register') {
+      return (
+        <NavigationCard title="Admin registration" onClose={this.closeCard}>
+          <Register onAuthResult={this.handleAuthResult} onBack={() => this.openCard('login')} />
         </NavigationCard>
       )
     }
@@ -272,6 +287,9 @@ export default class Navbar extends Component {
                 </button>
                 <button className="menu-item" type="button" onClick={() => this.openCard('login')}>
                   Admin sign in
+                </button>
+                <button className="menu-item" type="button" onClick={() => this.openCard('register')}>
+                  Admin register
                 </button>
               </>
             )}
@@ -399,6 +417,8 @@ class AiPanel extends Component {
     error: '',
     isSending: false,
     isListening: false,
+    isSpeaking: false,
+    autoSpeak: true,
     voiceStatus: '',
     apiNotice: '',
     showDiagnostics: false,
@@ -574,10 +594,19 @@ class AiPanel extends Component {
     const utterance = new window.SpeechSynthesisUtterance(answer)
     utterance.rate = 1.0
     utterance.pitch = 1.0
+    utterance.onstart = () => this.setState({ isSpeaking: true })
+    utterance.onend = () => this.setState({ isSpeaking: false })
+    utterance.onerror = () => this.setState({ isSpeaking: false })
+    this.setState({ isSpeaking: true })
     window.speechSynthesis.speak(utterance)
   }
 
-  sendQuery = async (queryText, autoSpeak = false) => {
+  stopSpeaking = () => {
+    window.speechSynthesis?.cancel()
+    this.setState({ isSpeaking: false })
+  }
+
+  sendQuery = async (queryText, autoSpeak = this.state.autoSpeak) => {
     const text = (queryText || this.state.message).trim()
     if (!text) return
 
@@ -620,10 +649,11 @@ class AiPanel extends Component {
         this.speakAnswer(chatData.answer)
       }
     } catch (error) {
+      const fallbackAnswer = 'For emergency assistance, dial 112 (National Emergency Helpline). In flood, cyclone, or severe weather events: seek high ground or sturdy indoor shelter, stay away from downed power lines, and keep an emergency go-bag prepared.'
       this.setState({
         response: {
           status: 'SAFE_FALLBACK',
-          answer: 'For emergency assistance, dial 112 (National Emergency Helpline). In flood, cyclone, or severe weather events: seek high ground or sturdy indoor shelter, stay away from downed power lines, and keep an emergency go-bag prepared.',
+          answer: fallbackAnswer,
           warnings: [error instanceof TypeError ? 'Cannot reach local backend; showing public disaster advisory.' : error.message],
           sources: [{
             documentId: 'local-emergency-advisory',
@@ -634,6 +664,9 @@ class AiPanel extends Component {
         },
         error: '',
       })
+      if (autoSpeak) {
+        this.speakAnswer(fallbackAnswer)
+      }
     } finally {
       this.setState({ isSending: false })
     }
@@ -641,12 +674,12 @@ class AiPanel extends Component {
 
   submit = (event) => {
     event.preventDefault()
-    this.sendQuery(this.state.message, false)
+    this.sendQuery(this.state.message, this.state.autoSpeak)
   }
 
   handleChipClick = (chipQuery) => {
     this.setState({ message: chipQuery })
-    this.sendQuery(chipQuery, false)
+    this.sendQuery(chipQuery, this.state.autoSpeak)
   }
 
   render() {
@@ -658,15 +691,21 @@ class AiPanel extends Component {
     ).values()]
 
     const suggestions = [
-      '🌪️ Cyclone safety checklist',
-      '🌊 Flood evacuation steps',
-      '⚡ Lightning shelter guide',
-      '🎒 Emergency go-bag items',
-      '📞 Emergency helplines (112)',
+      { icon: '🌪️', label: 'Cyclone checklist', query: 'What should I do before a cyclone?' },
+      { icon: '🌊', label: 'Flood safety steps', query: 'How do I stay safe during flooding?' },
+      { icon: '⚡', label: 'Lightning shelter', query: 'Where is safe during a thunderstorm?' },
+      { icon: '🎒', label: 'Emergency kit', query: 'What should I pack in an emergency go-bag?' },
+      { icon: '📞', label: 'Helplines', query: 'Which emergency helpline should I call in India?' },
+      { icon: '🧭', label: 'How this assistant works', query: 'What can you do?' },
     ]
 
     const statusBadge = this.state.response?.status === 'GROUNDED'
-      ? { label: '🛡️ Official Guidelines Grounded', className: 'badge-grounded' }
+      ? {
+          label: this.state.response?.sourceType === 'builtin'
+            ? '🛡️ Verified Safety Guidance'
+            : '🛡️ Official Guidelines Grounded',
+          className: 'badge-grounded',
+        }
       : this.state.response?.status === 'SAFE_FALLBACK'
         ? { label: 'ℹ️ Disaster Safety Advisory', className: 'badge-fallback' }
         : { label: this.state.response?.status || 'Active', className: 'badge-default' }
@@ -682,14 +721,14 @@ class AiPanel extends Component {
         <div className="chat-suggestions-container">
           <span className="chat-suggestions-label">Quick Safety Topics:</span>
           <div className="chat-suggestion-chips">
-            {suggestions.map((topic) => (
+            {suggestions.map((suggestion) => (
               <button
-                key={topic}
+                key={suggestion.query}
                 type="button"
                 className="chat-suggestion-chip"
-                onClick={() => this.handleChipClick(topic.slice(3).trim())}
+                onClick={() => this.handleChipClick(suggestion.query)}
               >
-                {topic}
+                <span aria-hidden="true">{suggestion.icon}</span> {suggestion.label}
               </button>
             ))}
           </div>
@@ -749,14 +788,21 @@ class AiPanel extends Component {
           </button>
         </form>
 
+          <div className="chat-response-card" style={{ display: 'none' }} />
         {this.state.response && (
           <div className={`chat-response-card ${this.state.response.status === 'GROUNDED' ? 'is-grounded' : ''}`} role="status" aria-live="polite">
             <div className="chat-response-header">
               <span className={`status-pill ${statusBadge.className}`}>{statusBadge.label}</span>
               {this.state.response.answer && (
-                <button className="chat-speak-button" type="button" onClick={() => this.speakAnswer()}>
-                  <span aria-hidden="true">🔊</span> Read aloud
-                </button>
+                this.state.isSpeaking ? (
+                  <button className="chat-speak-button" type="button" onClick={this.stopSpeaking}>
+                    <span aria-hidden="true">⏹</span> Stop reading
+                  </button>
+                ) : (
+                  <button className="chat-speak-button" type="button" onClick={() => this.speakAnswer()}>
+                    <span aria-hidden="true">🔊</span> Read aloud
+                  </button>
+                )
               )}
             </div>
 
@@ -764,11 +810,13 @@ class AiPanel extends Component {
               {this.state.response.answer || this.state.response.warnings?.[0] || 'No supported guidance available.'}
             </p>
 
-            {this.state.response.warnings?.length > 0 && (
+            {this.state.response.warnings?.filter((w) => !/built-in basic safety cache/i.test(w)).length > 0 && (
               <div className="chat-warnings-box">
-                {this.state.response.warnings.map((warning) => (
-                  <small key={warning} className="chat-warning-item">⚠️ {warning}</small>
-                ))}
+                {this.state.response.warnings
+                  .filter((w) => !/built-in basic safety cache/i.test(w))
+                  .map((warning) => (
+                    <small key={warning} className="chat-warning-item">⚠️ {warning}</small>
+                  ))}
               </div>
             )}
 

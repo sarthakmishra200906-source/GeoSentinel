@@ -8,6 +8,7 @@ export default function PhoneVerification({ verificationToken, phoneToVerify = '
   const [isSending, setIsSending] = useState(false)
   const [isVerifying, setIsVerifying] = useState(false)
   const [hasSentCode, setHasSentCode] = useState(false)
+  const [devCode, setDevCode] = useState('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
 
@@ -28,6 +29,7 @@ export default function PhoneVerification({ verificationToken, phoneToVerify = '
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to send the verification code')
       setHasSentCode(true)
+      setDevCode(data.devCode || '')
       setMessage(data.message)
     } catch (sendError) {
       setError(sendError.message)
@@ -94,6 +96,11 @@ export default function PhoneVerification({ verificationToken, phoneToVerify = '
         </form>
       )}
       {message && <p className="form-success">{message}</p>}
+      {devCode && (
+        <p className="auth-field-hint" role="status">
+          Local development code: <strong>{devCode}</strong>
+        </p>
+      )}
       {error && <p className="form-error">{error}</p>}
     </div>
   )

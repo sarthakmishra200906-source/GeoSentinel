@@ -2,7 +2,6 @@ import { Router } from 'express'
 import rateLimit from 'express-rate-limit'
 import {
   getCurrentUser,
-  googleLogin,
   login,
   register,
   requestPasswordReset,
@@ -30,7 +29,6 @@ const phoneVerificationLimiter = rateLimit({
 
 router.post('/register', authLimiter, register)
 router.post('/login', authLimiter, login)
-router.post('/google', authLimiter, googleLogin)
 router.post('/phone/send-otp', phoneVerificationLimiter, requirePhoneVerification, sendPhoneOtp)
 router.post('/phone/verify-otp', phoneVerificationLimiter, requirePhoneVerification, verifyPhoneOtp)
 router.post('/request-password-reset', authLimiter, requestPasswordReset)

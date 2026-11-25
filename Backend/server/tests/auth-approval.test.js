@@ -1,10 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import bcrypt from 'bcryptjs'
-import { OAuth2Client } from 'google-auth-library'
 import jwt from 'jsonwebtoken'
 import User from '../models/User.js'
-import { login, register, googleLogin, sendPhoneOtp } from '../controllers/authController.js'
+import { login, register, sendPhoneOtp, verifyPhoneOtp } from '../controllers/authController.js'
 import { requireAuth, requirePhoneVerification } from '../middleware/auth.js'
 import { bootstrapAdmin } from '../services/bootstrapAdmin.js'
 
@@ -84,25 +83,21 @@ test('password registration ignores client-supplied roles and requires phone ver
   }
 })
 
-test('production password registration cannot bypass verified Google sign-in', async () => {
-  const originalNodeEnv = process.env.NODE_ENV
+test('password registration can be disabled explicitly', async () => {
   const originalPasswordRegistration = process.env.ALLOW_PASSWORD_REGISTRATION
-  process.env.NODE_ENV = 'production'
-  process.env.ALLOW_PASSWORD_REGISTRATION = 'true'
+  process.env.ALLOW_PASSWORD_REGISTRATION = 'false'
   try {
     const response = responseRecorder()
     await register({ body: {} }, response, (error) => { throw error })
     assert.equal(response.statusCode, 403)
-    assert.equal(response.body.code, 'GOOGLE_SIGN_IN_REQUIRED')
+    assert.equal(response.body.code, 'REGISTRATION_DISABLED')
   } finally {
-    if (originalNodeEnv === undefined) delete process.env.NODE_ENV
-    else process.env.NODE_ENV = originalNodeEnv
     if (originalPasswordRegistration === undefined) delete process.env.ALLOW_PASSWORD_REGISTRATION
     else process.env.ALLOW_PASSWORD_REGISTRATION = originalPasswordRegistration
   }
 })
 
-test('Google-only accounts receive generic invalid credentials for password login', async () => {
+test('accounts without a password receive generic invalid credentials', async () => {
   const originalFindOne = User.findOne
   User.findOne = () => ({ select: async () => ({ password: undefined }) })
   try {
@@ -139,49 +134,75 @@ test('ordinary accounts cannot use the administrator sign-in endpoint', async ()
   }
 })
 
-test('ordinary accounts cannot sign in through Google authentication', async () => {
+test('local development phone verification issues and accepts a one-time code', async () => {
   const originalFindOne = User.findOne
-  const originalVerifyIdToken = OAuth2Client.prototype.verifyIdToken
-  const originalGoogleClientId = process.env.GOOGLE_CLIENT_ID
-  process.env.GOOGLE_CLIENT_ID = 'test-client-id'
-  OAuth2Client.prototype.verifyIdToken = async () => ({
-    getPayload: () => ({ email: 'user@example.com', email_verified: true, sub: 'google-user-id' }),
-  })
-  User.findOne = () => ({
-    select: async () => ({ role: 'user', googleId: 'google-user-id' }),
-  })
+  const originalJwtSecret = process.env.JWT_SECRET
+  const originalNodeEnv = process.env.NODE_ENV
+  const originalDevMode = process.env.PHONE_VERIFICATION_DEV_MODE
+  const twilioKeys = ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_VERIFY_SERVICE_SID']
+  const originalTwilioValues = Object.fromEntries(twilioKeys.map((key) => [key, process.env[key]]))
+  twilioKeys.forEach((key) => delete process.env[key])
+  process.env.NODE_ENV = 'development'
+  process.env.PHONE_VERIFICATION_DEV_MODE = 'true'
+  process.env.JWT_SECRET = 'test-secret'
+
+  const user = {
+    _id: { toString: () => 'dev-otp-user' },
+    phoneVerificationPhone: '+12025550123',
+    phoneVerificationLastSentAt: new Date(Date.now() - 120_000),
+    isPhoneVerified: false,
+    isApproved: false,
+    save: async () => {},
+    toObject() {
+      return { ...this }
+    },
+  }
+  User.findOne = () => ({ select: async () => null })
 
   try {
-    const response = responseRecorder()
-    await googleLogin({ body: { credential: 'verified-test-credential' } }, response, (error) => { throw error })
-    assert.equal(response.statusCode, 403)
-    assert.equal(response.body.error, 'Only administrators can sign in')
+    const sendResponse = responseRecorder()
+    await sendPhoneOtp({ user, body: { phone: '+1 (202) 555-0123' } }, sendResponse, (error) => { throw error })
+    assert.equal(sendResponse.statusCode, null)
+    assert.match(sendResponse.body.devCode, /^\d{6}$/)
+
+    const verifyResponse = responseRecorder()
+    await verifyPhoneOtp({ user, body: { code: sendResponse.body.devCode } }, verifyResponse, (error) => { throw error })
+    assert.equal(verifyResponse.statusCode, null)
+    assert.equal(verifyResponse.body.status, 'pending_approval')
+    assert.equal(user.isPhoneVerified, true)
   } finally {
     User.findOne = originalFindOne
-    OAuth2Client.prototype.verifyIdToken = originalVerifyIdToken
-    if (originalGoogleClientId === undefined) delete process.env.GOOGLE_CLIENT_ID
-    else process.env.GOOGLE_CLIENT_ID = originalGoogleClientId
+    if (originalJwtSecret === undefined) delete process.env.JWT_SECRET
+    else process.env.JWT_SECRET = originalJwtSecret
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV
+    else process.env.NODE_ENV = originalNodeEnv
+    if (originalDevMode === undefined) delete process.env.PHONE_VERIFICATION_DEV_MODE
+    else process.env.PHONE_VERIFICATION_DEV_MODE = originalDevMode
+    for (const key of twilioKeys) {
+      if (originalTwilioValues[key] === undefined) delete process.env[key]
+      else process.env[key] = originalTwilioValues[key]
+    }
   }
 })
 
-test('Google sign-in and SMS verification report missing provider configuration', async () => {
-  const originalGoogleClientId = process.env.GOOGLE_CLIENT_ID
+test('SMS verification reports missing provider configuration outside local dev mode', async () => {
+  const originalNodeEnv = process.env.NODE_ENV
+  const originalDevMode = process.env.PHONE_VERIFICATION_DEV_MODE
   const twilioKeys = ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_VERIFY_SERVICE_SID']
   const originalTwilioValues = Object.fromEntries(twilioKeys.map((key) => [key, process.env[key]]))
-  delete process.env.GOOGLE_CLIENT_ID
+  process.env.NODE_ENV = 'production'
+  delete process.env.PHONE_VERIFICATION_DEV_MODE
   twilioKeys.forEach((key) => delete process.env[key])
 
   try {
-    const googleResponse = responseRecorder()
-    await googleLogin({ body: {} }, googleResponse, (error) => { throw error })
-    assert.equal(googleResponse.statusCode, 503)
-
     const phoneResponse = responseRecorder()
     await sendPhoneOtp({}, phoneResponse)
     assert.equal(phoneResponse.statusCode, 503)
   } finally {
-    if (originalGoogleClientId === undefined) delete process.env.GOOGLE_CLIENT_ID
-    else process.env.GOOGLE_CLIENT_ID = originalGoogleClientId
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV
+    else process.env.NODE_ENV = originalNodeEnv
+    if (originalDevMode === undefined) delete process.env.PHONE_VERIFICATION_DEV_MODE
+    else process.env.PHONE_VERIFICATION_DEV_MODE = originalDevMode
     for (const key of twilioKeys) {
       if (originalTwilioValues[key] === undefined) delete process.env[key]
       else process.env[key] = originalTwilioValues[key]

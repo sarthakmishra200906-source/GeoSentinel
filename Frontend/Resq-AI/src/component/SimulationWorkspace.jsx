@@ -1,20 +1,20 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import { Line } from 'react-chartjs-2'
-import { MapContainer, Polyline, TileLayer, CircleMarker, Popup, useMap, useMapEvents } from 'react-leaflet'
+import { MapContainer, Polyline, TileLayer, Circle, CircleMarker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 
 import { API_URL } from '../api'
 const SELECTED_RUN_STORAGE_KEY = 'resq-ai-selected-simulation-run'
-const DEFAULT_ROUTE = [
-  { latitude: 17.6, longitude: 88.8 },
-  { latitude: 19, longitude: 87.7 },
-  { latitude: 20.3, longitude: 86.6 },
-]
 const DEFAULT_SCENARIO = {
-  name: 'Odisha cyclone rehearsal',
-  windSpeedKmh: 160,
-  routePoints: DEFAULT_ROUTE,
-  hourlyMm: 180,
+  name: 'Bay of Bengal forward forecast',
+  startLatitude: 17.6,
+  startLongitude: 88.8,
+  headingDeg: 315,
+  forwardSpeedKmh: 18,
+  windSpeedKmh: 140,
+  centralPressureHpa: 985,
+  galeRadiusKm: 180,
+  hourlyMm: 120,
   durationHours: 24,
   institutions: 500,
   shelters: 20,
@@ -26,22 +26,25 @@ function scenarioFromParameters(name, parameters = {}) {
   const capacity = parameters.capacity || {}
   return {
     name: name || DEFAULT_SCENARIO.name,
+    startLatitude: cyclone.startLatitude ?? DEFAULT_SCENARIO.startLatitude,
+    startLongitude: cyclone.startLongitude ?? DEFAULT_SCENARIO.startLongitude,
+    headingDeg: cyclone.headingDeg ?? DEFAULT_SCENARIO.headingDeg,
+    forwardSpeedKmh: cyclone.forwardSpeedKmh ?? DEFAULT_SCENARIO.forwardSpeedKmh,
     windSpeedKmh: cyclone.windSpeedKmh ?? DEFAULT_SCENARIO.windSpeedKmh,
-    routePoints: cyclone.routePoints || [
-      { latitude: cyclone.startLatitude ?? 17.6, longitude: cyclone.startLongitude ?? 88.8 },
-      { latitude: cyclone.targetLatitude ?? 20.3, longitude: cyclone.targetLongitude ?? 86.6 },
-    ],
+    centralPressureHpa: cyclone.centralPressureHpa ?? DEFAULT_SCENARIO.centralPressureHpa,
+    galeRadiusKm: cyclone.galeRadiusKm ?? DEFAULT_SCENARIO.galeRadiusKm,
     hourlyMm: rainfall.hourlyMm ?? DEFAULT_SCENARIO.hourlyMm,
-    durationHours: rainfall.durationHours ?? DEFAULT_SCENARIO.durationHours,
+    durationHours: cyclone.durationHours ?? rainfall.durationHours ?? DEFAULT_SCENARIO.durationHours,
     institutions: capacity.institutions ?? DEFAULT_SCENARIO.institutions,
     shelters: capacity.shelters ?? DEFAULT_SCENARIO.shelters,
+    legacyRoutePoints: cyclone.routePoints || [],
   }
 }
 
-function RouteMapClick({ enabled, onAddPoint }) {
+function StartPointMapClick({ enabled, onPick }) {
   useMapEvents({
     click(event) {
-      if (enabled) onAddPoint({ latitude: event.latlng.lat, longitude: event.latlng.lng })
+      if (enabled) onPick({ latitude: event.latlng.lat, longitude: event.latlng.lng })
     },
   })
   return null
@@ -169,40 +172,27 @@ export default function SimulationWorkspace({ token }) {
     setMessage('The previous run remains saved in run history. Configure a new scenario and create another isolated run.')
   }
 
-  const addRoutePoint = (point) => {
-    if (run) return
-    setScenario((current) => ({
-      ...current,
-      routePoints: [
-        ...current.routePoints.slice(0, -1),
-        point,
-        current.routePoints[current.routePoints.length - 1],
-      ],
-    }))
-  }
-
-  const insertRoutePoint = () => {
-    setScenario((current) => {
-      const target = current.routePoints[current.routePoints.length - 1]
-      const previous = current.routePoints[current.routePoints.length - 2]
-      const point = {
-        latitude: (Number(previous.latitude) + Number(target.latitude)) / 2,
-        longitude: (Number(previous.longitude) + Number(target.longitude)) / 2,
-      }
-      return {
+  const autoSteer = async () => {
+    setBusy(true)
+    try {
+      const query = new URLSearchParams({
+        latitude: String(scenario.startLatitude),
+        longitude: String(scenario.startLongitude),
+      })
+      const response = await fetch(`${API_URL}/simulation/steering-wind?${query}`, { headers })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to fetch steering wind')
+      setScenario((current) => ({
         ...current,
-        routePoints: [...current.routePoints.slice(0, -1), point, target],
-      }
-    })
-  }
-
-  const updateRoutePoint = (index, key, value) => {
-    setScenario((current) => ({
-      ...current,
-      routePoints: current.routePoints.map((point, pointIndex) =>
-        pointIndex === index ? { ...point, [key]: value } : point,
-      ),
-    }))
+        headingDeg: data.headingDeg,
+        forwardSpeedKmh: data.forwardSpeedKmh,
+      }))
+      setMessage(`Steering wind from Open-Meteo ${data.level}: heading ${data.headingDeg}°, forward speed ${data.forwardSpeedKmh} km/h.`)
+    } catch (error) {
+      setMessage(error.message)
+    } finally {
+      setBusy(false)
+    }
   }
 
   React.useEffect(() => {
@@ -257,12 +247,16 @@ export default function SimulationWorkspace({ token }) {
         body: JSON.stringify({
           name: scenario.name,
           parameters: {
+            mode: 'forward_forecast',
             cyclone: {
+              startLatitude: Number(scenario.startLatitude),
+              startLongitude: Number(scenario.startLongitude),
+              headingDeg: scenario.headingDeg === 'auto' ? 'auto' : Number(scenario.headingDeg),
+              forwardSpeedKmh: Number(scenario.forwardSpeedKmh),
               windSpeedKmh: Number(scenario.windSpeedKmh),
-              routePoints: scenario.routePoints.map((point) => ({
-                latitude: Number(point.latitude),
-                longitude: Number(point.longitude),
-              })),
+              centralPressureHpa: Number(scenario.centralPressureHpa),
+              galeRadiusKm: Number(scenario.galeRadiusKm),
+              durationHours: Number(scenario.durationHours),
             },
             rainfall: { hourlyMm: Number(scenario.hourlyMm), durationHours: Number(scenario.durationHours) },
             capacity: { districts: 30, institutions: Number(scenario.institutions), shelters: Number(scenario.shelters) },
@@ -356,12 +350,30 @@ export default function SimulationWorkspace({ token }) {
   }
 
   const selectedStep = timelineIndex >= 0 ? steps[timelineIndex] : null
-  const activeRoute = selectedStep?.cyclone.routePoints
-    || run?.scenario?.parameters?.cyclone?.routePoints
-    || scenario.routePoints
+  const legacyRoute = run?.scenario?.parameters?.cyclone?.routePoints || scenario.legacyRoutePoints || []
+  const legacyPositions = legacyRoute.map((point) => [Number(point.latitude), Number(point.longitude)])
+  const startPosition = [
+    Number(run?.scenario?.parameters?.cyclone?.startLatitude ?? scenario.startLatitude),
+    Number(run?.scenario?.parameters?.cyclone?.startLongitude ?? scenario.startLongitude),
+  ]
+  const getStepPosition = (stepItem) => {
+    if (Number.isFinite(stepItem.cyclone.positionLatitude) && Number.isFinite(stepItem.cyclone.positionLongitude)) {
+      return [stepItem.cyclone.positionLatitude, stepItem.cyclone.positionLongitude]
+    }
+    const progress = stepItem.cyclone.approachProgress || 0
+    const start = legacyPositions[0] || startPosition
+    const target = legacyPositions[legacyPositions.length - 1] || start
+    return [
+      start[0] + (target[0] - start[0]) * progress,
+      start[1] + (target[1] - start[1]) * progress,
+    ]
+  }
   const routePositions = useMemo(
-    () => activeRoute.map((point) => [Number(point.latitude), Number(point.longitude)]),
-    [activeRoute],
+    () => (steps.length
+      ? [startPosition, ...steps.map(getStepPosition)]
+      : legacyPositions.length > 1 ? legacyPositions : [startPosition]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [steps, scenario.startLatitude, scenario.startLongitude, run],
   )
   const rescueCenterMarkers = useMemo(() => rescueCenterLayer.centers.flatMap((center) => {
     const coordinates = center.location?.coordinates
@@ -383,18 +395,7 @@ export default function SimulationWorkspace({ token }) {
     [routePositions, rescueCenterMarkers],
   )
   const routeStart = routePositions[0]
-  const routeTarget = routePositions[routePositions.length - 1]
-  const getStepPosition = (stepItem) => {
-    if (Number.isFinite(stepItem.cyclone.positionLatitude) && Number.isFinite(stepItem.cyclone.positionLongitude)) {
-      return [stepItem.cyclone.positionLatitude, stepItem.cyclone.positionLongitude]
-    }
-    const progress = stepItem.cyclone.approachProgress
-    return [
-      routeStart[0] + (routeTarget[0] - routeStart[0]) * progress,
-      routeStart[1] + (routeTarget[1] - routeStart[1]) * progress,
-    ]
-  }
-  const cyclonePath = [routeStart, ...steps.map(getStepPosition)]
+  const cyclonePath = routePositions
   const drawnRouteSegments = splitRouteAtDateLine(routePositions)
   const drawnCycloneSegments = splitRouteAtDateLine(cyclonePath)
   const cyclonePosition = selectedStep ? getStepPosition(selectedStep) : routeStart
@@ -422,8 +423,8 @@ export default function SimulationWorkspace({ token }) {
   }
   const downloadHourly = () => {
     const rows = [
-      ['run_id', 'hour', 'timestamp', 'risk_tier', 'risk_score', 'rainfall_mm_per_hour', 'river_signal', 'river_discharge_proxy_m3s', 'temperature_proxy_c', 'cyclone_wind_kmh', 'distance_to_target_km'],
-      ...steps.map((item) => [run?._id, item.sequence, item.timestamp, item.impacts.riskTier, item.impacts.riskScore, item.weather.hourlyRainfallMm, item.weather.riverSignal, item.weather.riverDischargeM3s, item.weather.temperatureC, item.cyclone.windSpeedKmh, item.cyclone.distanceToTargetKm ?? item.cyclone.distanceToOdishaKm]),
+      ['run_id', 'lead_hours', 'timestamp', 'risk_tier', 'risk_score', 'rainfall_mm_per_hour', 'river_signal', 'river_discharge_proxy_m3s', 'temperature_proxy_c', 'cyclone_wind_kmh', 'cone_radius_km', 'distance_from_start_km'],
+      ...steps.map((item) => [run?._id, item.cyclone.leadHours || item.sequence, item.timestamp, item.impacts.riskTier, item.impacts.riskScore, item.weather.hourlyRainfallMm, item.weather.riverSignal, item.weather.riverDischargeM3s, item.weather.temperatureC, item.cyclone.windSpeedKmh, item.cyclone.coneRadiusKm, item.cyclone.distanceToStartKm ?? item.cyclone.distanceToTargetKm ?? item.cyclone.distanceToOdishaKm]),
     ]
     downloadFile(`${runStamp}-hourly-telemetry.csv`, rows.map((row) => row.map(csvCell).join(',')).join('\n'), 'text/csv;charset=utf-8')
   }
@@ -561,13 +562,13 @@ export default function SimulationWorkspace({ token }) {
   return (
     <section className="simulation-workspace" aria-labelledby="simulation-title">
       <div className="simulation-banner">
-        <strong>SIMULATION MODE · ODISHA</strong>
-        <span>Synthetic rule-matrix rehearsal. No live alert, SOS, or dispatch is created.</span>
+        <strong>SIMULATION MODE · IMD-STYLE FORWARD FORECAST</strong>
+        <span>Synthetic training projection with cone of uncertainty and wind radii. No live alert, SOS, or dispatch is created.</span>
       </div>
       <div className="simulation-workspace-header">
         <div className="simulation-workspace-intro">
-          <h3 id="simulation-title">Flood &amp; cyclone simulator</h3>
-          <p>Configure a custom global route. District impact calculations are Odisha-only synthetic proxies. The selected run is restored when you return from another admin view; synthetic time advances only when you choose Step.</p>
+          <h3 id="simulation-title">Forward cyclone simulator</h3>
+          <p>Pick one starting eye position, set its heading and speed (or auto-fetch steering wind from Open-Meteo), then project the track over 12–48 hours with a growing uncertainty cone, 34/50/64 kt wind radii, and cone-based district/state impact. This is a rehearsal aid, not an official forecast.</p>
         </div>
         <div className="simulation-run-history">
           <div>
@@ -600,33 +601,33 @@ export default function SimulationWorkspace({ token }) {
           <button type="button" onClick={pause} disabled={!run || busy || run.status === 'PAUSED' || run.status === 'COMPLETED'}>Pause</button>
         </div>
       </div>
-      <div className="simulation-controls">
+      <div className="simulation-controls simulation-forward-controls">
         {[
-          ['name', 'Scenario name', 'text'],
-          ['windSpeedKmh', 'Wind speed (km/h)', 'number'],
-          ['hourlyMm', 'Heavy rain (mm/hour)', 'number'],
-          ['durationHours', 'Rain duration (hours)', 'number'],
-          ['institutions', 'Institutions exposed', 'number'],
-          ['shelters', 'Shelters available', 'number'],
-        ].map(([key, label, type]) => (
-          <label key={key}>{label}<input type={type} min={key === 'durationHours' ? 1 : key === 'windSpeedKmh' ? 0 : key === 'hourlyMm' ? 0 : undefined} max={key === 'durationHours' ? 168 : key === 'windSpeedKmh' ? 300 : key === 'hourlyMm' ? 500 : undefined} value={scenario[key]} disabled={Boolean(run) || busy} onChange={(event) => setScenario({ ...scenario, [key]: event.target.value })} /></label>
+          ['name', 'Scenario name', 'text', undefined, undefined],
+          ['headingDeg', 'Heading ° (0–360 or auto)', 'text', undefined, undefined],
+          ['forwardSpeedKmh', 'Forward speed (km/h)', 'number', 5, 80],
+          ['windSpeedKmh', 'Max sustained wind (km/h)', 'number', 20, 300],
+          ['centralPressureHpa', 'Central pressure (hPa)', 'number', 870, 1050],
+          ['galeRadiusKm', 'Gale radius (km)', 'number', 40, 500],
+          ['hourlyMm', 'Heavy rain (mm/hour)', 'number', 0, 500],
+          ['durationHours', 'Forecast duration (hours)', 'number', 1, 48],
+          ['institutions', 'Institutions exposed', 'number', 0, 2000],
+          ['shelters', 'Shelters available', 'number', 0, 100],
+        ].map(([key, label, type, min, max]) => (
+          <label key={key}>{label}<input type={type} min={min} max={max} value={scenario[key]} disabled={Boolean(run) || busy} onChange={(event) => setScenario({ ...scenario, [key]: event.target.value })} /></label>
         ))}
       </div>
-      <div className="simulation-route-editor">
+      <div className="simulation-route-editor simulation-start-editor">
         <div className="simulation-map-heading">
-          <strong>Custom cyclone route ({scenario.routePoints.length}/20 waypoints)</strong>
-          <span>Click the map to add route points; drag the map or edit coordinates directly.</span>
+          <strong>Starting eye position</strong>
+          <span>Click the map to place the eye, or enter its coordinates below.</span>
         </div>
-        {scenario.routePoints.map((point, index) => (
-          <div className="simulation-route-point" key={`route-${index}`}>
-            <strong>{index === 0 ? 'Start' : index === scenario.routePoints.length - 1 ? 'Target' : `Waypoint ${index}`}</strong>
-            <label>Latitude<input aria-label={`Waypoint ${index + 1} latitude`} type="number" min="-90" max="90" step="0.0001" value={point.latitude} disabled={Boolean(run) || busy} onChange={(event) => updateRoutePoint(index, 'latitude', event.target.value)} /></label>
-            <label>Longitude<input aria-label={`Waypoint ${index + 1} longitude`} type="number" min="-180" max="180" step="0.0001" value={point.longitude} disabled={Boolean(run) || busy} onChange={(event) => updateRoutePoint(index, 'longitude', event.target.value)} /></label>
-            {scenario.routePoints.length > 2 && <button type="button" onClick={() => setScenario((current) => ({ ...current, routePoints: current.routePoints.filter((_, pointIndex) => pointIndex !== index) }))} disabled={Boolean(run) || busy}>Remove</button>}
-          </div>
-        ))}
-        <button type="button" onClick={insertRoutePoint} disabled={Boolean(run) || busy || scenario.routePoints.length >= 20}>Insert midpoint waypoint</button>
-        <p>Custom route points affect cyclone movement only. The current impact model still reports Odisha districts and synthetic state context.</p>
+        <div className="simulation-start-fields">
+          <label>Latitude<input aria-label="Starting eye latitude" type="number" min="-90" max="90" step="0.0001" value={scenario.startLatitude} disabled={Boolean(run) || busy} onChange={(event) => setScenario({ ...scenario, startLatitude: event.target.value })} /></label>
+          <label>Longitude<input aria-label="Starting eye longitude" type="number" min="-180" max="180" step="0.0001" value={scenario.startLongitude} disabled={Boolean(run) || busy} onChange={(event) => setScenario({ ...scenario, startLongitude: event.target.value })} /></label>
+          <button type="button" onClick={autoSteer} disabled={Boolean(run) || busy}>Auto-fetch steering wind</button>
+        </div>
+        <p>The eye advances hourly with a small beta-drift correction, weakens after landfall, and gains a cone of uncertainty (~25 km at +6h, 45 km at +12h, 75 km at +24h). A highlighted +12h impact card appears once hour 12 is generated.</p>
       </div>
       {run && <p className="simulation-run-meta">Run {run._id} · {run.status} · synthetic hour {run.sequence}</p>}
       {steps.length > 0 && (
@@ -651,29 +652,55 @@ export default function SimulationWorkspace({ token }) {
       )}
       <div className="simulation-map-panel">
         <div className="simulation-map-heading">
-          <strong>Synthetic cyclone route and rescue centers</strong>
-          <span>{selectedStep ? `Hour ${selectedStep.sequence} · ${selectedStep.impacts.riskTier}` : 'Advance the run to draw the track'}</span>
+          <strong>Forward track, cone of uncertainty and rescue centers</strong>
+          <span>{selectedStep ? `+${selectedStep.cyclone.leadHours || selectedStep.sequence}h · ${selectedStep.impacts.riskTier}` : 'Advance the run to draw the projected track'}</span>
         </div>
         <p>
-          Click the map to add route waypoints while configuring. Rescue center markers use the current registry and are reference-only;
-          simulation does not change their status or occupancy.
+          Click the map to place the starting eye while configuring. The shaded band is the IMD-style cone of uncertainty;
+          the inner rings are 34/50/64 kt wind radii. Rescue centers are reference-only and are not changed by this run.
           {rescueCenterLayer.status === 'loading' && ' Loading rescue centers…'}
           {rescueCenterLayer.status === 'error' && ` Rescue center layer unavailable: ${rescueCenterLayer.error}`}
           {rescueCenterLayer.status === 'loaded' && ` ${rescueCenterMarkers.length} open/limited rescue centers displayed.`}
           {unmappedCenterCount > 0 && ` ${unmappedCenterCount} center records have invalid coordinates and were omitted.`}
-          {' '}Impacts remain a synthetic Odisha district model.
+          {' '}Impacts are synthetic projections, not official warnings.
         </p>
-        <MapContainer center={routeTarget} zoom={4} scrollWheelZoom className="simulation-map">
+        <MapContainer center={routeStart} zoom={4} scrollWheelZoom className="simulation-map">
           <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           <FitRouteBounds positions={mapBoundsPositions} />
-          <RouteMapClick enabled={!run && scenario.routePoints.length < 20} onAddPoint={addRoutePoint} />
+          <StartPointMapClick enabled={!run && !busy} onPick={(point) => setScenario((current) => ({ ...current, startLatitude: point.latitude, startLongitude: point.longitude }))} />
           {drawnRouteSegments.map((segment, index) => <Polyline key={`planned-route-${index}`} positions={segment} pathOptions={{ color: '#94a3b8', dashArray: '8 8', weight: 2 }} />)}
           {steps.length > 0 && drawnCycloneSegments.map((segment, index) => <Polyline key={`actual-track-${index}`} positions={segment} pathOptions={{ color: '#dc2626', weight: 5 }} />)}
-          {routePositions.map((position, index) => (
-            <CircleMarker key={`route-marker-${index}`} center={position} radius={index === routePositions.length - 1 ? 8 : 5} pathOptions={{ color: index === routePositions.length - 1 ? '#0f766e' : '#1d4ed8', fillColor: index === routePositions.length - 1 ? '#14b8a6' : '#60a5fa', fillOpacity: 0.9 }}>
-              <Popup>{index === 0 ? 'Cyclone start' : index === routePositions.length - 1 ? 'Custom route target' : `Route waypoint ${index}`}</Popup>
+          {selectedStep && Number(selectedStep.cyclone.coneRadiusKm) > 0 && (
+            <Circle
+              center={cyclonePosition}
+              radius={selectedStep.cyclone.coneRadiusKm * 1000}
+              pathOptions={{ color: '#f59e0b', fillColor: '#fbbf24', fillOpacity: 0.16, weight: 1, dashArray: '6 6' }}
+            >
+              <Popup>Cone of uncertainty at +{selectedStep.cyclone.leadHours || selectedStep.sequence}h: ±{selectedStep.cyclone.coneRadiusKm} km</Popup>
+            </Circle>
+          )}
+          {selectedStep && [
+            ['kt34Km', '#f97316'],
+            ['kt50Km', '#dc2626'],
+            ['kt64Km', '#7f1d1d'],
+          ].filter(([key]) => Number(selectedStep.cyclone.windRadiiKm?.[key]) > 0).map(([key, color]) => (
+            <Circle
+              key={key}
+              center={cyclonePosition}
+              radius={selectedStep.cyclone.windRadiiKm[key] * 1000}
+              pathOptions={{ color, fillColor: color, fillOpacity: 0.08, weight: 1 }}
+            >
+              <Popup>{key.replace('Km', '')} wind radius: {selectedStep.cyclone.windRadiiKm[key]} km</Popup>
+            </Circle>
+          ))}
+          {steps.filter((item) => [12, 24, 48].includes(item.cyclone.leadHours || item.sequence)).map((item) => (
+            <CircleMarker key={`milestone-${item.sequence}`} center={getStepPosition(item)} radius={7} pathOptions={{ color: '#1e3a8a', fillColor: '#3b82f6', fillOpacity: 0.9 }}>
+              <Popup>+{item.cyclone.leadHours || item.sequence}h milestone · {item.cyclone.windSpeedKmh} km/h · {item.impacts.riskTier}</Popup>
             </CircleMarker>
           ))}
+          <CircleMarker center={routeStart} radius={8} pathOptions={{ color: '#0f766e', fillColor: '#14b8a6', fillOpacity: 0.9 }}>
+            <Popup>Forecast starting eye</Popup>
+          </CircleMarker>
           {rescueCenterMarkers.map(({ center, position }) => (
             <CircleMarker key={`rescue-center-${center._id}`} center={position} radius={7} pathOptions={{ color: '#166534', fillColor: '#22c55e', fillOpacity: 0.9 }}>
               <Popup>
@@ -689,9 +716,10 @@ export default function SimulationWorkspace({ token }) {
           ))}
           <CircleMarker center={cyclonePosition} radius={12} pathOptions={{ color: '#991b1b', fillColor: '#ef4444', fillOpacity: 0.9 }}>
             <Popup>
-              Synthetic cyclone · {selectedStep ? `Hour ${selectedStep.sequence}` : 'start'}<br />
+              Projected eye · {selectedStep ? `+${selectedStep.cyclone.leadHours || selectedStep.sequence}h` : 'start'}<br />
               Wind: {selectedStep?.cyclone.windSpeedKmh?.toFixed(1) || '—'} km/h<br />
-              Distance to target: {(selectedStep?.cyclone.distanceToTargetKm ?? selectedStep?.cyclone.distanceToOdishaKm)?.toFixed(1) || '—'} km
+              Cone radius: {selectedStep?.cyclone.coneRadiusKm ?? '—'} km<br />
+              Distance from start: {selectedStep?.cyclone.distanceToStartKm?.toFixed(1) || '—'} km
             </Popup>
           </CircleMarker>
         </MapContainer>
@@ -700,13 +728,35 @@ export default function SimulationWorkspace({ token }) {
         <div className="simulation-results">
           <div className="simulation-metric"><span>Risk tier</span><strong>{selectedStep.impacts.riskTier}</strong></div>
           <div className="simulation-metric"><span>Risk score</span><strong>{Math.round(selectedStep.impacts.riskScore * 100)}%</strong></div>
-          <div className="simulation-metric"><span>Distance to route target</span><strong>{(selectedStep.cyclone.distanceToTargetKm ?? selectedStep.cyclone.distanceToOdishaKm).toFixed(1)} km</strong></div>
-          <div className="simulation-metric"><span>Critical districts</span><strong>{selectedStep.impacts.criticalDistricts}</strong></div>
+          <div className="simulation-metric"><span>Cone radius</span><strong>±{selectedStep.cyclone.coneRadiusKm ?? '—'} km</strong></div>
+          <div className="simulation-metric"><span>Wind / pressure</span><strong>{selectedStep.cyclone.windSpeedKmh} km/h · {selectedStep.cyclone.centralPressureHpa ?? '—'} hPa</strong></div>
+          <div className="simulation-metric"><span>Landfall</span><strong>{selectedStep.cyclone.isLandfall ? 'Yes · decaying' : 'Over water'}</strong></div>
+          <div className="simulation-metric"><span>Affected districts</span><strong>{selectedStep.impacts.affectedDistricts?.length ?? 0}</strong></div>
           <div className="simulation-districts">
             {selectedStep.impacts.districts.map((district) => (
-              <div key={district.district}><strong>{district.district}</strong><span>{district.riskTier} · {Math.round(district.riskScore * 100)}%</span></div>
+              <div key={district.district}><strong>{district.district}</strong><span>{district.riskTier} · {Math.round(district.riskScore * 100)}% · {district.projectedWindKmh ?? '—'} km/h</span></div>
             ))}
           </div>
+        </div>
+      )}
+      {steps.some((item) => item.impacts.milestone12h) && (
+        <div className="simulation-milestone-card">
+          <div className="simulation-map-heading">
+            <strong>+12h impact milestone</strong>
+            <span>Projected at {new Date(steps.find((item) => item.impacts.milestone12h).timestamp).toLocaleString()}</span>
+          </div>
+          {(() => {
+            const milestone = steps.find((item) => item.impacts.milestone12h).impacts.milestone12h
+            return (
+              <div className="simulation-milestone-grid">
+                <div><span>Eye position</span><strong>{milestone.positionLatitude.toFixed(2)}, {milestone.positionLongitude.toFixed(2)}</strong></div>
+                <div><span>Wind speed</span><strong>{milestone.windSpeedKmh} km/h</strong></div>
+                <div><span>Cone / gale radius</span><strong>±{milestone.coneRadiusKm} km / {milestone.galeRadiusKm} km</strong></div>
+                <div><span>Flood risk</span><strong>{milestone.floodRiskTier}</strong></div>
+                <div className="simulation-milestone-areas"><span>Affected districts ({milestone.affectedDistricts.length})</span><strong>{milestone.affectedDistricts.slice(0, 12).join(', ') || 'None inside cone + gale radius'}{milestone.affectedDistricts.length > 12 ? '…' : ''}</strong></div>
+              </div>
+            )
+          })()}
         </div>
       )}
       {steps.length > 0 && (
@@ -738,7 +788,7 @@ export default function SimulationWorkspace({ token }) {
             <div>
               <span className="eyebrow">Rehearsal evidence pack</span>
               <h4 id="simulation-outcome-title">Cyclone outcome, help and insight summary</h4>
-              <p>Route movement is customizable worldwide. Impacts remain synthetic Odisha and state-context proxies; live telemetry is separate.</p>
+              <p>Forward eye movement is projected worldwide from one starting point. Impacts remain synthetic Odisha and state-context proxies; live telemetry is separate.</p>
             </div>
             <div className="simulation-report-actions">
               <button type="button" onClick={downloadSummary}>Download executive summary</button>

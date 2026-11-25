@@ -671,9 +671,10 @@ router.get('/trends', async (request, response, next) => {
   }
 })
 
-router.get('/storms', async (_request, response, next) => {
+router.get('/storms', async (request, response, next) => {
   try {
-    response.json(await cycloneFeed.getCurrentEvents())
+    const scope = request.query.scope === 'india' ? 'india' : 'global'
+    response.json(await cycloneFeed.getCurrentEvents({ scope }))
   } catch (error) {
     next(error)
   }

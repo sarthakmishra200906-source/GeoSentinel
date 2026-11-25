@@ -3,13 +3,56 @@ import assert from 'node:assert/strict'
 import { validateSimulationName, validateSimulationParameters } from '../services/simulationValidation.js'
 import { calculateSimulationStep } from '../services/simulationEngine.js'
 
-test('simulation validation defaults to Odisha synthetic rule-matrix scope', () => {
+test('new scenarios default to IMD-style forward forecasting', () => {
   const parameters = validateSimulationParameters({
+    cyclone: {
+      startLatitude: 17.6,
+      startLongitude: 88.8,
+      headingDeg: 315,
+      forwardSpeedKmh: 18,
+      windSpeedKmh: 140,
+      centralPressureHpa: 980,
+      galeRadiusKm: 180,
+    },
+    rainfall: { hourlyMm: 120, durationHours: 24 },
+  })
+  assert.equal(parameters.mode, 'forward_forecast')
+  assert.equal(parameters.geography, 'GLOBAL')
+  assert.equal(parameters.dataSource, 'imd_style_forward_forecast')
+  assert.equal(parameters.engineScope, 'great_circle_forward_propagation')
+  assert.equal(parameters.cyclone.headingDeg, 315)
+})
+
+test('forward validation accepts auto steering and rejects unbounded inputs', () => {
+  const auto = validateSimulationParameters({ cyclone: { headingDeg: 'AUTO' } })
+  assert.equal(auto.cyclone.headingDeg, 'auto')
+  assert.throws(
+    () => validateSimulationParameters({ cyclone: { forwardSpeedKmh: 100 } }),
+    /forwardSpeedKmh must be a number/,
+  )
+  assert.throws(
+    () => validateSimulationParameters({ cyclone: { headingDeg: 361 } }),
+    /headingDeg must be a number/,
+  )
+  assert.throws(
+    () => validateSimulationParameters({ mode: 'unknown' }),
+    /mode must be forward_forecast or fixed_route/,
+  )
+  assert.throws(
+    () => validateSimulationParameters({ rainfall: { durationHours: 49 } }),
+    /rainfall\.durationHours must be a number/,
+  )
+})
+
+test('simulation validation keeps the legacy Odisha rule-matrix scope for saved runs', () => {
+  const parameters = validateSimulationParameters({
+    mode: 'fixed_route',
     cyclone: { approachDistanceKm: 200 },
     rainfall: { hourlyMm: 120, durationHours: 24 },
     capacity: { districts: 30, institutions: 2000, shelters: 100 },
   })
 
+  assert.equal(parameters.mode, 'fixed_route')
   assert.equal(parameters.geography, 'ODISHA')
   assert.equal(parameters.dataSource, 'synthetic_simulation')
   assert.equal(parameters.engineScope, 'district_institution_rule_matrix')
@@ -25,13 +68,14 @@ test('simulation validation rejects values outside the bounded demo budget', () 
     /capacity\.institutions must be a number/,
   )
   assert.throws(
-    () => validateSimulationParameters({ cyclone: { routePoints: [{ latitude: 0, longitude: 0 }] } }),
+    () => validateSimulationParameters({ mode: 'fixed_route', cyclone: { routePoints: [{ latitude: 0, longitude: 0 }] } }),
     /routePoints must contain between 2 and 20 points/,
   )
 })
 
-test('simulation accepts a custom multi-waypoint route outside the Odisha bounds', () => {
+test('saved fixed-route runs accept a custom multi-waypoint route outside the Odisha bounds', () => {
   const parameters = validateSimulationParameters({
+    mode: 'fixed_route',
     cyclone: {
       windSpeedKmh: 140,
       routePoints: [
@@ -53,8 +97,9 @@ test('simulation accepts a custom multi-waypoint route outside the Odisha bounds
   assert.equal(final.impacts.districts.length, 30)
 })
 
-test('simulation follows the short path across the international date line', () => {
+test('saved fixed-route runs follow the short path across the international date line', () => {
   const parameters = validateSimulationParameters({
+    mode: 'fixed_route',
     cyclone: {
       routePoints: [
         { latitude: 0, longitude: 170 },
@@ -74,8 +119,9 @@ test('simulation validation requires a bounded scenario name', () => {
   assert.throws(() => validateSimulationName(''), /Simulation name is required/)
 })
 
-test('simulation engine advances deterministic synthetic district results', () => {
+test('saved fixed-route runs advance deterministic synthetic district results', () => {
   const parameters = validateSimulationParameters({
+    mode: 'fixed_route',
     cyclone: { approachDistanceKm: 200, windSpeedKmh: 160 },
     rainfall: { hourlyMm: 180, durationHours: 24 },
     capacity: { districts: 30, institutions: 500, shelters: 20 },

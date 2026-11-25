@@ -1573,7 +1573,7 @@ body,
 }
 
 .navigation-card {
-  width: min(520px, 50vw);
+  width: min(560px, 94vw);
   height: 100%;
   overflow-y: auto;
   box-sizing: border-box;
@@ -1930,10 +1930,77 @@ body,
   border-radius: 8px;
 }
 
-.simulation-route-editor p {
+.simulation-route-editor p,
+.simulation-map-panel > p {
   margin: 0;
   color: #64748b;
   font-size: .82rem;
+}
+
+.simulation-forward-controls {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.simulation-start-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(140px, 1fr)) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.simulation-start-fields label {
+  display: grid;
+  gap: 5px;
+  color: #475569;
+  font-size: .8rem;
+  font-weight: 700;
+}
+
+.simulation-start-fields input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+}
+
+.simulation-milestone-card {
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid #fbbf24;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #fffbeb, #fff);
+}
+
+.simulation-milestone-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.simulation-milestone-grid > div {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid #fde68a;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .8);
+}
+
+.simulation-milestone-grid span {
+  color: #92400e;
+  font-size: .78rem;
+  font-weight: 700;
+}
+
+.simulation-milestone-grid strong {
+  color: #451a03;
+  font-size: .9rem;
+}
+
+.simulation-milestone-areas {
+  grid-column: 1 / -1;
 }
 
 .simulation-stored-report {
@@ -2181,6 +2248,10 @@ body,
 
   .simulation-results {
     grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+
+  .simulation-start-fields {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .audit-panel-header,
@@ -2575,6 +2646,223 @@ body,
   background: #eff6ff;
   cursor: pointer;
   font: inherit;
+}
+
+/* Admin sign-in & registration cards */
+.auth-card-form {
+  gap: 16px;
+}
+
+.auth-form-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
+}
+
+.auth-form-intro-icon {
+  display: grid;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.12);
+  font-size: 1.25rem;
+}
+
+.auth-form-intro h3 {
+  margin: 0 0 4px;
+  color: #0f172a;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.auth-form-intro p {
+  margin: 0;
+  color: #475569;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.auth-section-label {
+  margin: 4px 0 -6px !important;
+  color: #2563eb;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.auth-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 14px;
+}
+
+.auth-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.auth-field-wide {
+  grid-column: 1 / -1;
+}
+
+.auth-field label {
+  margin-bottom: 6px;
+}
+
+.auth-field input,
+.auth-field select,
+.auth-field textarea {
+  margin-bottom: 0;
+  padding: 11px 12px;
+  border-color: #cbd5e1;
+  border-radius: 9px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.auth-field input:focus,
+.auth-field select:focus,
+.auth-field textarea:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.auth-field input::placeholder,
+.auth-field textarea::placeholder {
+  color: #94a3b8;
+}
+
+.auth-field-hint {
+  margin-top: 5px;
+  color: #64748b;
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.auth-card-form .password-field {
+  display: flex;
+  gap: 8px;
+}
+
+.auth-card-form .password-field input {
+  flex: 1;
+}
+
+.auth-card-form .password-field button {
+  flex: 0 0 auto;
+  align-self: stretch;
+  padding: 0 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  color: #1d4ed8;
+  background: #f8fafc;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.auth-card-form .password-field button:hover,
+.auth-card-form .password-field button:focus-visible {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.auth-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.auth-form-actions .form-submit {
+  flex: 1;
+  min-width: 180px;
+  padding: 12px 18px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.22);
+  font-weight: 600;
+}
+
+.auth-form-actions .form-submit:hover:not(:disabled),
+.auth-form-actions .form-submit:focus-visible:not(:disabled) {
+  background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+}
+
+.auth-secondary-button {
+  padding: 11px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  color: #334155;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.auth-secondary-button:hover,
+.auth-secondary-button:focus-visible {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  background: #f8fafc;
+}
+
+.auth-foot {
+  margin: 16px 0 0 !important;
+  color: #475569;
+  font-size: 0.88rem;
+  text-align: center;
+}
+
+.text-link-button {
+  padding: 0;
+  border: 0;
+  color: #1d4ed8;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.form-error,
+.form-success {
+  margin: 0 !important;
+  padding: 10px 12px;
+  border-radius: 9px;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.form-error {
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  background: #fef2f2;
+}
+
+.form-success {
+  border: 1px solid #bbf7d0;
+  color: #15803d;
+  background: #f0fdf4;
+}
+
+@media (max-width: 560px) {
+  .auth-field-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .chat-response {

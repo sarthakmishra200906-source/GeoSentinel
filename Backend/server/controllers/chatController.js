@@ -34,7 +34,8 @@ export async function handleUserChat(request, response, next) {
           currentMemorySummary: request.user?.memorySummary || 'No signed-in chat history.',
           grounded: true,
           status: 'GROUNDED',
-          warnings: ['Answered from the built-in basic safety cache; no database or LLM call was made.'],
+          warnings: [],
+          sourceType: 'builtin',
           sources: [cachedAnswer.source],
         },
       })

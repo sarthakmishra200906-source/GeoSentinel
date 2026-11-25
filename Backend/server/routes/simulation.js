@@ -17,6 +17,69 @@ const router = Router()
 const RUN_PAGE_SIZE = 50
 const MAX_PDF_BYTES = 12 * 1024 * 1024
 
+// Open-Meteo upper-air winds are reported as "direction the wind comes from".
+// A tropical system is steered in the opposite direction, so we add 180 degrees
+// and scale the flow down to a realistic translational speed.
+router.get('/steering-wind', ...requireAdmin, async (request, response, next) => {
+  try {
+    const latitude = Number(request.query.latitude)
+    const longitude = Number(request.query.longitude)
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
+        !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+      response.status(400).json({ error: 'Valid latitude and longitude are required' })
+      return
+    }
+    const url = new URL('https://api.open-meteo.com/v1/forecast')
+    url.searchParams.set('latitude', String(latitude))
+    url.searchParams.set('longitude', String(longitude))
+    url.searchParams.set(
+      'hourly',
+      'wind_speed_500hPa,wind_direction_500hPa,wind_speed_700hPa,wind_direction_700hPa',
+    )
+    url.searchParams.set('forecast_days', '1')
+    url.searchParams.set('timezone', 'UTC')
+    const providerResponse = await fetch(url, { signal: AbortSignal.timeout(8000) })
+    if (!providerResponse.ok) {
+      response.status(502).json({ error: 'Steering wind provider is unavailable' })
+      return
+    }
+    const payload = await providerResponse.json()
+    const hourly = payload.hourly || {}
+    const firstValidIndex = (values) => (Array.isArray(values)
+      ? values.findIndex((value) => Number.isFinite(Number(value)))
+      : -1)
+    const upperLevelIndex = firstValidIndex(hourly.wind_direction_500hPa) >= 0
+      ? firstValidIndex(hourly.wind_speed_500hPa)
+      : firstValidIndex(hourly.wind_direction_700hPa)
+    if (upperLevelIndex < 0) {
+      response.status(502).json({ error: 'Steering wind data is unavailable for this location' })
+      return
+    }
+    const use500 = Number.isFinite(Number(hourly.wind_speed_500hPa?.[upperLevelIndex]))
+    const level = use500 ? '500hPa' : '700hPa'
+    const windDirectionDeg = Number(
+      (use500 ? hourly.wind_direction_500hPa : hourly.wind_direction_700hPa)[upperLevelIndex],
+    )
+    const windSpeedKmh = Number(
+      (use500 ? hourly.wind_speed_500hPa : hourly.wind_speed_700hPa)[upperLevelIndex],
+    )
+    const headingDeg = Math.round((windDirectionDeg + 180) % 360)
+    const forwardSpeedKmh = Math.round(Math.min(80, Math.max(5, windSpeedKmh * 0.35)))
+    response.json({
+      available: true,
+      provider: 'Open-Meteo',
+      level,
+      sampledAt: hourly.time?.[upperLevelIndex] || null,
+      windDirectionDeg,
+      windSpeedKmh,
+      headingDeg,
+      forwardSpeedKmh,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
 function encodeRunCursor(run) {
   return Buffer.from(JSON.stringify({ createdAt: run.createdAt, id: run._id }), 'utf8').toString('base64url')
 }
@@ -93,7 +156,7 @@ router.post('/scenarios', ...requireAdmin, async (request, response, next) => {
       version: 1,
       parameters,
       seed: request.body.seed || crypto.randomUUID(),
-      rulesetVersion: 'rule-matrix-v1',
+      rulesetVersion: parameters.mode === 'forward_forecast' ? 'forward-forecast-v1' : 'rule-matrix-v1',
       createdBy: request.user._id,
     })
     await recordAuditEvent({
@@ -102,7 +165,11 @@ router.post('/scenarios', ...requireAdmin, async (request, response, next) => {
       action: 'simulation.scenario.created',
       targetType: 'SimulationScenario',
       targetId: scenario._id,
-      changes: { geography: 'ODISHA', dataSource: 'synthetic_simulation' },
+      changes: {
+        mode: parameters.mode,
+        geography: parameters.geography,
+        dataSource: parameters.dataSource,
+      },
     })
     response.status(201).json(scenario)
   } catch (error) {
@@ -225,7 +292,7 @@ router.delete('/runs/:id', ...requireAdmin, async (request, response, next) => {
         timestepCount: removed.timestepCount,
         reportCount: removed.reportCount,
         scenarioDeleted: removed.scenarioDeleted,
-        dataSource: 'synthetic_simulation',
+        dataSource: run.scenario?.parameters?.dataSource || 'synthetic_simulation',
       },
     })
     response.json({ deleted: true, runId: run._id, ...removed })
@@ -265,7 +332,7 @@ router.get('/runs/:id/report', ...requireAdmin, async (request, response, next) 
     const peak = timesteps.reduce((current, item) => !current || item.impacts.riskScore > current.impacts.riskScore ? item : current, null)
     response.json({
       reportType: 'simulation_evidence_pack',
-      dataSource: 'synthetic_simulation',
+      dataSource: run.scenario?.parameters?.dataSource || 'synthetic_simulation',
       run: run.toObject(),
       scenario: run.scenario,
       timesteps,
@@ -423,7 +490,8 @@ router.post('/runs/:id/step', ...requireAdmin, async (request, response, next) =
       response.status(409).json({ error: 'Simulation is already complete' })
       return
     }
-    const durationHours = run.scenario.parameters.rainfall?.durationHours ?? 24
+    const durationHours = run.scenario.parameters.cyclone?.durationHours ??
+      run.scenario.parameters.rainfall?.durationHours ?? 24
     if (run.sequence >= durationHours) {
       response.status(409).json({ error: 'Simulation reached its configured duration and is complete' })
       return
@@ -433,7 +501,7 @@ router.post('/runs/:id/step', ...requireAdmin, async (request, response, next) =
       runId: run._id,
       sequence: run.sequence + 1,
       timestamp: timestep.timestamp,
-      dataSource: 'synthetic_simulation',
+      dataSource: run.scenario.parameters.dataSource || 'synthetic_simulation',
       cyclone: timestep.cyclone,
       weather: timestep.weather,
       impacts: timestep.impacts,
@@ -451,7 +519,7 @@ router.post('/runs/:id/step', ...requireAdmin, async (request, response, next) =
       action: 'simulation.run.step',
       targetType: 'SimulationRun',
       targetId: run._id,
-      changes: { sequence: created.sequence, riskTier: created.impacts.riskTier, dataSource: 'synthetic_simulation' },
+      changes: { sequence: created.sequence, riskTier: created.impacts.riskTier, dataSource: created.dataSource },
     })
     let storedReport = null
     let reportError = null
