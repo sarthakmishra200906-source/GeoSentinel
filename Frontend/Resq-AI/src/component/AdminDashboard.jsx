@@ -15,7 +15,7 @@ import {
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend, Filler)
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+import { API_URL } from '../api'
 
 export default function AdminDashboard({ token, activeSection = 'overview' }) {
   const [guidelines, setGuidelines] = useState([])

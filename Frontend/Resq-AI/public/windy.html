@@ -320,9 +320,7 @@
                 updateIndicator(`<span>🌐 ${target.toUpperCase()} Layer</span>`, '#38bdf8')
               }
 
-              if (windyInstance.broadcast && typeof windyInstance.broadcast.fire === 'function') {
-                windyInstance.broadcast.fire('paramsChanged')
-              }
+              // store.set('overlay', ...) updates Windy's active overlay automatically without firing paramsChanged with undefined.
             } catch (err) {
               console.error('Windy overlay change error:', err)
             }

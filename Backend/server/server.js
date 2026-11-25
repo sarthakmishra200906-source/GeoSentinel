@@ -19,19 +19,43 @@ import { bootstrapAdmin, ensureOptionalPhoneIndex, ensureProductionAdmin } from 
 const app = express()
 const port = Number(process.env.PORT || 5000)
 app.set('trust proxy', 1)
-const allowedOrigins = (
-  process.env.CORS_ORIGINS ||
-  'http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000'
+const defaultOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'https://geo-sentinel-rust.vercel.app',
+]
+if (process.env.FRONTEND_URL) {
+  try {
+    defaultOrigins.push(new URL(process.env.FRONTEND_URL).origin)
+  } catch {
+    // Ignore malformed FRONTEND_URL
+  }
+}
+const allowedOrigins = new Set(
+  [
+    ...defaultOrigins,
+    ...(process.env.CORS_ORIGINS || '')
+      .split(',')
+      .map((origin) => origin.trim().replace(/\/+$/, ''))
+      .filter(Boolean),
+  ],
 )
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean)
 
 app.use(
   cors({
     credentials: true,
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin) {
+        callback(null, true)
+        return
+      }
+      const normalized = origin.trim().replace(/\/+$/, '')
+      if (
+        allowedOrigins.has(normalized) ||
+        /^https:\/\/geo-sentinel[a-z0-9-]*\.vercel\.app$/i.test(normalized)
+      ) {
         callback(null, true)
         return
       }

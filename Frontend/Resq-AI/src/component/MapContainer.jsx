@@ -13,7 +13,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import WindyMap from './WindyMap'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+import { API_URL } from '../api'
 const streetMapUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
 
 const createCityWeatherIcon = (point) => {

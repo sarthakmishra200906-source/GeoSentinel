@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+import { API_URL } from '../api'
 const BASE_URL = import.meta.env.BASE_URL || '/'
 const WINDY_VIEWER_URL = `${BASE_URL.endsWith('/') ? BASE_URL : `${BASE_URL}/`}windy.html`
 const WINDY_MAP_KEY = import.meta.env.VITE_WINDY_MAP_FORECAST_KEY

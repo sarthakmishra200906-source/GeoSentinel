@@ -1,7 +1,7 @@
 import React, { Component } from 'react'
 import { GoogleLogin } from '@react-oauth/google'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+import { API_URL } from '../api'
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID
 
 export default class Register extends Component {

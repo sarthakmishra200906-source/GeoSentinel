@@ -3,7 +3,7 @@ import { Line } from 'react-chartjs-2'
 import { MapContainer, Polyline, TileLayer, CircleMarker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+import { API_URL } from '../api'
 const SELECTED_RUN_STORAGE_KEY = 'resq-ai-selected-simulation-run'
 const DEFAULT_ROUTE = [
   { latitude: 17.6, longitude: 88.8 },
