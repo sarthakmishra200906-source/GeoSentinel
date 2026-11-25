@@ -33,6 +33,9 @@ let cachedAt = 0
 let cachedDashboard = null
 let cachedDashboardAt = 0
 let dashboardInFlight = null
+let cachedStates = null
+let cachedStatesAt = 0
+let statesInFlight = null
 
 function validateCoordinates(request, response) {
   const latitude = Number(request.query.lat)
@@ -73,59 +76,95 @@ router.get('/tiles/:layer/:z/:x/:y.png', async (request, response, next) => {
 
 router.get('/points', async (_request, response, next) => {
   try {
-    if (!process.env.OPENWEATHER_API_KEY) {
-      response.json({ available: false, points: [] })
-      return
-    }
-
     if (cachedPoints && Date.now() - cachedAt < 5 * 60 * 1000) {
       response.json({ available: true, points: cachedPoints, updatedAt: new Date(cachedAt).toISOString(), cached: true })
       return
     }
 
-    const results = await Promise.allSettled(
-      hubs.map(async (hub) => {
-        const url = new URL('https://api.openweathermap.org/data/2.5/weather')
-        url.searchParams.set('lat', hub.latitude)
-        url.searchParams.set('lon', hub.longitude)
-        url.searchParams.set('appid', process.env.OPENWEATHER_API_KEY)
-        url.searchParams.set('units', 'metric')
-        const weatherResponse = await fetch(url)
-        if (!weatherResponse.ok) throw new Error(`OpenWeather request failed with status ${weatherResponse.status}`)
-        const data = await weatherResponse.json()
-        return {
-          ...hub,
-          temperature: Math.round(data.main.temp * 10) / 10,
-          feelsLike: Math.round(data.main.feels_like * 10) / 10,
-          humidity: data.main.humidity,
-          pressure: data.main.pressure,
-          windSpeed: Math.round((data.wind.speed || 0) * 3.6),
-          windDirection: data.wind.deg ?? null,
-          windGust: data.wind.gust ? Math.round(data.wind.gust * 3.6) : 0,
-          rainfall1h: data.rain?.['1h'] || 0,
-          rainfall3h: data.rain?.['3h'] || 0,
-          cloudCover: data.clouds?.all ?? 0,
-          visibility: data.visibility ?? null,
-          condition: data.weather?.[0]?.description || 'Unknown',
-          conditionIcon: data.weather?.[0]?.icon || null,
-          tempMin: data.main.temp_min,
-          tempMax: data.main.temp_max,
-          sunrise: data.sys?.sunrise ? new Date(data.sys.sunrise * 1000).toISOString() : null,
-          sunset: data.sys?.sunset ? new Date(data.sys.sunset * 1000).toISOString() : null,
-          observedAt: data.dt ? new Date(data.dt * 1000).toISOString() : null,
-        }
-      }),
+    if (process.env.OPENWEATHER_API_KEY) {
+      const results = await Promise.allSettled(
+        hubs.map(async (hub) => {
+          const url = new URL('https://api.openweathermap.org/data/2.5/weather')
+          url.searchParams.set('lat', hub.latitude)
+          url.searchParams.set('lon', hub.longitude)
+          url.searchParams.set('appid', process.env.OPENWEATHER_API_KEY)
+          url.searchParams.set('units', 'metric')
+          const weatherResponse = await fetch(url, { signal: AbortSignal.timeout(6000) })
+          if (!weatherResponse.ok) throw new Error(`OpenWeather request failed with status ${weatherResponse.status}`)
+          const data = await weatherResponse.json()
+          return {
+            ...hub,
+            temperature: Math.round(data.main.temp * 10) / 10,
+            feelsLike: Math.round(data.main.feels_like * 10) / 10,
+            humidity: data.main.humidity,
+            pressure: data.main.pressure,
+            windSpeed: Math.round((data.wind.speed || 0) * 3.6),
+            windDirection: data.wind.deg ?? null,
+            windGust: data.wind.gust ? Math.round(data.wind.gust * 3.6) : 0,
+            rainfall1h: data.rain?.['1h'] || 0,
+            rainfall3h: data.rain?.['3h'] || 0,
+            cloudCover: data.clouds?.all ?? 0,
+            visibility: data.visibility ?? null,
+            condition: data.weather?.[0]?.description || 'Unknown',
+            conditionIcon: data.weather?.[0]?.icon || null,
+            tempMin: data.main.temp_min,
+            tempMax: data.main.temp_max,
+            sunrise: data.sys?.sunrise ? new Date(data.sys.sunrise * 1000).toISOString() : null,
+            sunset: data.sys?.sunset ? new Date(data.sys.sunset * 1000).toISOString() : null,
+            observedAt: data.dt ? new Date(data.dt * 1000).toISOString() : null,
+          }
+        }),
+      )
+      const points = results
+        .filter((result) => result.status === 'fulfilled')
+        .map((result) => result.value)
+      if (points.length) {
+        cachedPoints = points
+        cachedAt = Date.now()
+        response.json({ available: true, points, updatedAt: new Date(cachedAt).toISOString(), failedPointCount: hubs.length - points.length })
+        return
+      }
+    }
+
+    // Fallback: Open-Meteo batched query for all regional city hubs (no API key required)
+    const omUrl = new URL('https://api.open-meteo.com/v1/forecast')
+    omUrl.searchParams.set('latitude', hubs.map((h) => h.latitude).join(','))
+    omUrl.searchParams.set('longitude', hubs.map((h) => h.longitude).join(','))
+    omUrl.searchParams.set(
+      'current',
+      'temperature_2m,relative_humidity_2m,apparent_temperature,rain,precipitation,weather_code,surface_pressure,wind_speed_10m,wind_direction_10m,wind_gusts_10m,cloud_cover',
     )
-    const points = results
-      .filter((result) => result.status === 'fulfilled')
-      .map((result) => result.value)
-    if (!points.length) {
+    omUrl.searchParams.set('timezone', 'auto')
+    const omRes = await fetch(omUrl, { signal: AbortSignal.timeout(8000) })
+    if (!omRes.ok) {
       response.status(503).json({ available: false, points: [], error: 'Weather provider returned no readings' })
       return
     }
+    const omPayload = await omRes.json()
+    const omList = Array.isArray(omPayload) ? omPayload : [omPayload]
+    const points = hubs.map((hub, idx) => {
+      const cur = omList[idx]?.current || {}
+      return {
+        ...hub,
+        temperature: Math.round((cur.temperature_2m ?? 26) * 10) / 10,
+        feelsLike: Math.round((cur.apparent_temperature ?? cur.temperature_2m ?? 26) * 10) / 10,
+        humidity: cur.relative_humidity_2m ?? 65,
+        pressure: Math.round(cur.surface_pressure ?? 1012),
+        windSpeed: Math.round((cur.wind_speed_10m || 0) * 10) / 10,
+        windDirection: cur.wind_direction_10m ?? null,
+        windGust: Math.round((cur.wind_gusts_10m || 0) * 10) / 10,
+        rainfall1h: cur.rain ?? cur.precipitation ?? 0,
+        rainfall3h: 0,
+        cloudCover: cur.cloud_cover ?? 20,
+        visibility: 10000,
+        condition: weatherCodeToCondition(cur.weather_code),
+        conditionIcon: null,
+        observedAt: cur.time || new Date().toISOString(),
+      }
+    })
     cachedPoints = points
     cachedAt = Date.now()
-    response.json({ available: true, points, updatedAt: new Date(cachedAt).toISOString(), failedPointCount: hubs.length - points.length })
+    response.json({ available: true, points, updatedAt: new Date(cachedAt).toISOString(), provider: 'Open-Meteo' })
   } catch (error) {
     next(error)
   }
@@ -266,47 +305,81 @@ router.get('/location', async (request, response, next) => {
 
 router.get('/forecast', async (request, response, next) => {
   try {
-    if (!process.env.OPENWEATHER_API_KEY) {
-      response.status(503).json({ available: false, error: 'OpenWeather forecast is optional and not configured' })
-      return
-    }
     const coordinates = validateCoordinates(request, response)
     if (!coordinates) return
-    const url = new URL('https://api.openweathermap.org/data/2.5/forecast')
-    url.searchParams.set('lat', coordinates.latitude)
-    url.searchParams.set('lon', coordinates.longitude)
-    url.searchParams.set('appid', process.env.OPENWEATHER_API_KEY)
-    url.searchParams.set('units', 'metric')
-    const weatherResponse = await fetch(url)
-    if (!weatherResponse.ok) {
-      response.status(weatherResponse.status).json({ available: false, error: 'Weather provider rejected this location' })
+
+    if (process.env.OPENWEATHER_API_KEY) {
+      try {
+        const url = new URL('https://api.openweathermap.org/data/2.5/forecast')
+        url.searchParams.set('lat', coordinates.latitude)
+        url.searchParams.set('lon', coordinates.longitude)
+        url.searchParams.set('appid', process.env.OPENWEATHER_API_KEY)
+        url.searchParams.set('units', 'metric')
+        const weatherResponse = await fetch(url, { signal: AbortSignal.timeout(6000) })
+        if (weatherResponse.ok) {
+          const data = await weatherResponse.json()
+          const daily = new Map()
+          for (const item of data.list || []) {
+            const date = item.dt_txt?.slice(0, 10)
+            if (!date) continue
+            const existing = daily.get(date) || {
+              date,
+              minTemperature: item.main.temp_min,
+              maxTemperature: item.main.temp_max,
+              precipitation: 0,
+              humidity: item.main.humidity,
+              condition: item.weather?.[0]?.description || 'Unknown',
+              icon: item.weather?.[0]?.icon || null,
+            }
+            existing.minTemperature = Math.min(existing.minTemperature, item.main.temp_min)
+            existing.maxTemperature = Math.max(existing.maxTemperature, item.main.temp_max)
+            existing.precipitation += Number(item.rain?.['3h'] || 0)
+            daily.set(date, existing)
+          }
+          response.json({
+            available: true,
+            latitude: coordinates.latitude,
+            longitude: coordinates.longitude,
+            provider: 'OpenWeather',
+            days: [...daily.values()].slice(0, 5),
+          })
+          return
+        }
+      } catch (_) {
+        // Fallback to Open-Meteo
+      }
+    }
+
+    // Open-Meteo 5-Day Forecast fallback (no API key required)
+    const omUrl = new URL('https://api.open-meteo.com/v1/forecast')
+    omUrl.searchParams.set('latitude', coordinates.latitude)
+    omUrl.searchParams.set('longitude', coordinates.longitude)
+    omUrl.searchParams.set('daily', 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max')
+    omUrl.searchParams.set('forecast_days', '5')
+    omUrl.searchParams.set('timezone', 'auto')
+    const omRes = await fetch(omUrl, { signal: AbortSignal.timeout(8000) })
+    if (!omRes.ok) {
+      response.status(503).json({ available: false, error: 'Forecast provider is temporarily unavailable' })
       return
     }
-    const data = await weatherResponse.json()
-    const daily = new Map()
-    for (const item of data.list || []) {
-      const date = item.dt_txt?.slice(0, 10)
-      if (!date) continue
-      const existing = daily.get(date) || {
-        date,
-        minTemperature: item.main.temp_min,
-        maxTemperature: item.main.temp_max,
-        precipitation: 0,
-        humidity: item.main.humidity,
-        condition: item.weather?.[0]?.description || 'Unknown',
-        icon: item.weather?.[0]?.icon || null,
-      }
-      existing.minTemperature = Math.min(existing.minTemperature, item.main.temp_min)
-      existing.maxTemperature = Math.max(existing.maxTemperature, item.main.temp_max)
-      existing.precipitation += Number(item.rain?.['3h'] || 0)
-      daily.set(date, existing)
-    }
+    const omData = await omRes.json()
+    const daily = omData.daily || {}
+    const days = (daily.time || []).map((date, idx) => ({
+      date,
+      minTemperature: Number(daily.temperature_2m_min?.[idx] ?? 0),
+      maxTemperature: Number(daily.temperature_2m_max?.[idx] ?? 0),
+      precipitation: Number(daily.precipitation_sum?.[idx] ?? 0),
+      precipitationProbability: Number(daily.precipitation_probability_max?.[idx] ?? 0),
+      maxWindSpeed: Number(daily.wind_speed_10m_max?.[idx] ?? 0),
+      condition: weatherCodeToCondition(daily.weather_code?.[idx]),
+      icon: null,
+    }))
     response.json({
       available: true,
       latitude: coordinates.latitude,
       longitude: coordinates.longitude,
-      provider: 'OpenWeather',
-      days: [...daily.values()].slice(0, 5),
+      provider: 'Open-Meteo 5-Day Forecast',
+      days: days.slice(0, 5),
     })
   } catch (error) {
     next(error)
@@ -416,7 +489,19 @@ router.get('/dashboard', async (_request, response, next) => {
 })
 
 router.get('/states', async (_request, response, next) => {
-  try {
+  if (cachedStates && Date.now() - cachedStatesAt < 5 * 60 * 1000) {
+    response.json({ ...cachedStates, cached: true })
+    return
+  }
+  if (statesInFlight) {
+    try {
+      response.json({ ...(await statesInFlight), cached: true })
+    } catch (error) {
+      next(error)
+    }
+    return
+  }
+  statesInFlight = (async () => {
     const url = new URL('https://api.open-meteo.com/v1/forecast')
     url.searchParams.set('latitude', hubs.map((hub) => hub.latitude).join(','))
     url.searchParams.set('longitude', hubs.map((hub) => hub.longitude).join(','))
@@ -424,38 +509,38 @@ router.get('/states', async (_request, response, next) => {
     url.searchParams.set('daily', 'precipitation_sum,temperature_2m_max')
     url.searchParams.set('forecast_days', '1')
     url.searchParams.set('timezone', 'UTC')
-    const providerResponse = await fetch(url)
+    const providerResponse = await fetch(url, { signal: AbortSignal.timeout(10000) })
     if (!providerResponse.ok) {
-      response.status(503).json({ error: `Forecast provider returned HTTP ${providerResponse.status}` })
-      return
+      throw new Error(`Forecast provider returned HTTP ${providerResponse.status}`)
     }
     const payload = await providerResponse.json()
-    const floodPayloads = await Promise.all(
+    const floodResults = await Promise.allSettled(
       hubs.map(async (hub) => {
         const floodUrl = new URL('https://flood-api.open-meteo.com/v1/flood')
         floodUrl.searchParams.set('latitude', hub.latitude)
         floodUrl.searchParams.set('longitude', hub.longitude)
         floodUrl.searchParams.set('daily', 'river_discharge')
         floodUrl.searchParams.set('forecast_days', '1')
-        const floodResponse = await fetch(floodUrl)
+        const floodResponse = await fetch(floodUrl, { signal: AbortSignal.timeout(5000) })
         return floodResponse.ok ? floodResponse.json() : null
       }),
     )
+    const floodPayloads = floodResults.map((r) => (r.status === 'fulfilled' ? r.value : null))
     const readings = (Array.isArray(payload) ? payload : [payload]).map((data, index) => {
       const current = data.current || {}
       const daily = data.daily || {}
-      const riverDischarge = Number(floodPayloads[index]?.daily?.river_discharge?.[0])
+      const riverDischarge = Number(floodPayloads[index]?.daily?.river_discharge?.[0] || 0)
       const assessment = assessTelemetry({
-        precipitationSum: Number(current.rain ?? current.precipitation),
-        rain72h: Number(current.rain ?? current.precipitation),
+        precipitationSum: Number(current.rain ?? current.precipitation ?? 0),
+        rain72h: Number(current.rain ?? current.precipitation ?? 0),
         riverDischarge,
-        pressure: Number(current.surface_pressure),
-        windSpeed: Number(current.wind_speed_10m),
+        pressure: Number(current.surface_pressure ?? 1013),
+        windSpeed: Number(current.wind_speed_10m ?? 0),
       })
       return {
         ...hubs[index],
         rainfallMm: Number(daily.precipitation_sum?.[0] ?? current.precipitation ?? 0),
-        temperature: Number(daily.temperature_2m_max?.[0] ?? current.temperature_2m),
+        temperature: Number(daily.temperature_2m_max?.[0] ?? current.temperature_2m ?? 25),
         riverDischarge: Number.isFinite(riverDischarge) ? riverDischarge : null,
         activeFloodRisk: assessment.activeFloodRisk,
         activeFloodRiskTier: assessment.activeFloodRiskTier,
@@ -483,7 +568,7 @@ router.get('/states', async (_request, response, next) => {
       current.cities.push(reading.name)
       grouped.set(reading.state, current)
     }
-    response.json({
+    return {
       provider: 'Open-Meteo forecast',
       generatedAt: new Date().toISOString(),
       warning: 'Risk is proxy-calibrated and must not be used as an official emergency warning.',
@@ -495,9 +580,17 @@ router.get('/states', async (_request, response, next) => {
           ? Math.round((state.riskValues.reduce((total, value) => total + value, 0) / state.riskValues.length) * 100) / 100
           : null,
       })),
-    })
+    }
+  })()
+  try {
+    const result = await statesInFlight
+    cachedStates = result
+    cachedStatesAt = Date.now()
+    response.json(result)
   } catch (error) {
-    next(error)
+    response.status(503).json({ error: error.message })
+  } finally {
+    statesInFlight = null
   }
 })
 

@@ -4,6 +4,11 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const BASE_URL = import.meta.env.BASE_URL || '/'
 const WINDY_VIEWER_URL = `${BASE_URL.endsWith('/') ? BASE_URL : `${BASE_URL}/`}windy.html`
 const WINDY_MAP_KEY = import.meta.env.VITE_WINDY_MAP_FORECAST_KEY
+const WINDY_POINT_KEY = import.meta.env.VITE_WINDY_POINT_FORECAST_KEY
+
+function isConfiguredKey(value) {
+  return typeof value === 'string' && value.trim().length > 0 && !/^(?:replace-with|your-)/i.test(value.trim())
+}
 
 function getRiskClass(tier) {
   const t = String(tier || '').toUpperCase()
@@ -34,11 +39,12 @@ function getWeatherIcon(condition, isRain) {
   return '☀️'
 }
 
-export default function WindyMap({ onSwitchToMap }) {
+export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChange }) {
   const iframeRef = useRef(null)
-  const [tap, setTap] = useState(null)
+  const [tap, setTap] = useState(sharedLocation ? { lat: sharedLocation.latitude, lon: sharedLocation.longitude, values: [] } : null)
   const [weather, setWeather] = useState(null)
   const [forecast, setForecast] = useState(null)
+  const [windyPointForecast, setWindyPointForecast] = useState(null)
   const [prediction, setPrediction] = useState(null)
   const [loading, setLoading] = useState(false)
   const [activeOverlay, setActiveOverlay] = useState('wind')
@@ -50,10 +56,14 @@ export default function WindyMap({ onSwitchToMap }) {
   const [analysisStormId, setAnalysisStormId] = useState('')
   const [stormFeedLoading, setStormFeedLoading] = useState(false)
   const [radarTileUrl, setRadarTileUrl] = useState('')
-  const [userLocation, setUserLocation] = useState(null)
-  const [cardOpen, setCardOpen] = useState(false)
+  const [userLocation, setUserLocation] = useState(sharedLocation ? { lat: sharedLocation.latitude, lon: sharedLocation.longitude, accuracy: sharedLocation.accuracy } : null)
+  const [cardOpen, setCardOpen] = useState(Boolean(sharedLocation))
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchError, setSearchError] = useState('')
+  const [searching, setSearching] = useState(false)
 
-  const viewerUrl = `${WINDY_VIEWER_URL}?key=${encodeURIComponent(WINDY_MAP_KEY || '')}`
+  const hasWindyMapKey = isConfiguredKey(WINDY_MAP_KEY)
+  const viewerUrl = `${WINDY_VIEWER_URL}?key=${encodeURIComponent(hasWindyMapKey ? WINDY_MAP_KEY.trim() : '')}`
 
   // ── Send postMessage to Windy iframe helper ────────────────────────────────
   const postToIframe = useCallback((payload) => {
@@ -150,15 +160,19 @@ export default function WindyMap({ onSwitchToMap }) {
     fetchData(eye[0], eye[1])
   }
 
-  // ── Fetch complete weather & AI risk for selected point ───────────────────
-  const fetchData = async (lat, lon) => {
+  // ── Fetch complete weather, point forecast & AI risk for selected point ───
+  const fetchData = useCallback(async (lat, lon, label = '') => {
     setLoading(true)
     setWeather(null)
     setForecast(null)
+    setWindyPointForecast(null)
     setPrediction(null)
     setCardOpen(true)
+    if (onLocationChange) {
+      onLocationChange({ latitude: lat, longitude: lon, label })
+    }
     try {
-      const [locationRes, forecastRes, predRes] = await Promise.allSettled([
+      const requests = [
         fetch(`${API_URL}/weather/location?lat=${lat}&lon=${lon}`),
         fetch(`${API_URL}/weather/forecast?lat=${lat}&lon=${lon}`),
         fetch(`${API_URL}/prediction`, {
@@ -166,11 +180,31 @@ export default function WindyMap({ onSwitchToMap }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ latitude: lat, longitude: lon }),
         }),
-      ])
+      ]
+
+      if (isConfiguredKey(WINDY_POINT_KEY)) {
+        requests.push(
+          fetch('https://api.windy.com/api/point-forecast/v2', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              lat: Number(lat.toFixed(4)),
+              lon: Number(lon.toFixed(4)),
+              model: 'gfs',
+              parameters: ['temp', 'wind', 'precip', 'pressure', 'rh'],
+              levels: ['surface'],
+              key: WINDY_POINT_KEY.trim(),
+            }),
+          }),
+        )
+      }
+
+      const [locationRes, forecastRes, predRes, windyPointRes] = await Promise.allSettled(requests)
 
       let locData = null
       let fData = null
       let pData = null
+      let wpData = null
 
       if (locationRes.status === 'fulfilled' && locationRes.value.ok) {
         locData = await locationRes.value.json()
@@ -181,6 +215,30 @@ export default function WindyMap({ onSwitchToMap }) {
       if (predRes.status === 'fulfilled' && predRes.value.ok) {
         pData = await predRes.value.json()
       }
+      if (windyPointRes && windyPointRes.status === 'fulfilled' && windyPointRes.value.ok) {
+        const rawWp = await windyPointRes.value.json()
+        const tsList = Array.isArray(rawWp.ts) ? rawWp.ts : []
+        const temps = rawWp['temp-surface'] || []
+        const uWind = rawWp['wind_u-surface'] || []
+        const vWind = rawWp['wind_v-surface'] || []
+        const precip = rawWp['past3hprecip-surface'] || []
+        const pressure = rawWp['pressure-surface'] || []
+        wpData = tsList.slice(0, 6).map((ts, idx) => {
+          const tempC = Number.isFinite(temps[idx]) ? temps[idx] - 273.15 : null
+          const windKmh = Number.isFinite(uWind[idx]) && Number.isFinite(vWind[idx])
+            ? Math.hypot(uWind[idx], vWind[idx]) * 3.6
+            : null
+          const pressureHpa = Number.isFinite(pressure[idx]) ? pressure[idx] / 100 : null
+          const rainMm = Number.isFinite(precip[idx]) ? precip[idx] * 1000 : 0
+          return {
+            time: new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            tempC,
+            windKmh,
+            pressureHpa,
+            rainMm,
+          }
+        })
+      }
 
       // If location endpoint didn't succeed, check prediction's embedded weather
       if (!locData && pData?.weather) {
@@ -189,11 +247,12 @@ export default function WindyMap({ onSwitchToMap }) {
 
       setWeather(locData)
       setForecast(fData)
+      setWindyPointForecast(wpData)
       setPrediction(pData)
     } finally {
       setLoading(false)
     }
-  }
+  }, [onLocationChange])
 
   // ── On mount, load storms & radar url ──────────────────────────────────────
   useEffect(() => {
@@ -260,22 +319,51 @@ export default function WindyMap({ onSwitchToMap }) {
       : 'Not reported'
   }
 
+  // ── Search City / Place ───────────────────────────────────────────────────
+  const searchPlace = async (event) => {
+    event.preventDefault()
+    const q = searchQuery.trim()
+    if (!q) return
+    setSearching(true)
+    setSearchError('')
+    try {
+      const res = await fetch(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=1&language=en&format=json`,
+      )
+      const data = await res.json()
+      const hit = data?.results?.[0]
+      if (!hit) {
+        setSearchError(`Location "${q}" not found.`)
+        return
+      }
+      const label = [hit.name, hit.admin1, hit.country].filter(Boolean).join(', ')
+      postToIframe({ type: 'open-windy-picker', lat: hit.latitude, lon: hit.longitude })
+      setTap({ lat: hit.latitude, lon: hit.longitude, label, values: [] })
+      fetchData(hit.latitude, hit.longitude, label)
+    } catch {
+      setSearchError('Search unavailable right now.')
+    } finally {
+      setSearching(false)
+    }
+  }
+
   // ── GPS locate ─────────────────────────────────────────────────────────────
   const locateMe = () => {
     if (!navigator.geolocation) {
       alert('Geolocation is not supported by your browser.')
       return
     }
+    setSearchError('')
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
-        const { latitude: lat, longitude: lon } = coords
+        const { latitude: lat, longitude: lon, accuracy } = coords
         postToIframe({ type: 'open-windy-picker', lat, lon })
-        setUserLocation({ lat, lon })
-        setTap({ lat, lon, values: [] })
+        setUserLocation({ lat, lon, accuracy })
+        setTap({ lat, lon, accuracy, values: [] })
         fetchData(lat, lon)
       },
-      () => alert('Could not get your location. Please check browser permissions.'),
-      { enableHighAccuracy: true, timeout: 10000 },
+      () => alert('Could not get your location. Check browser permissions or search your city above.'),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     )
   }
 
@@ -352,6 +440,18 @@ export default function WindyMap({ onSwitchToMap }) {
             ))}
           </select>
         )}
+
+        {/* Search Place */}
+        <form className="map-place-search" onSubmit={searchPlace}>
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search city or place…"
+            aria-label="Search city or place"
+          />
+          <button type="submit" disabled={searching}>{searching ? '…' : '🔍'}</button>
+        </form>
 
         {/* My Location button */}
         <button className="btn-location" type="button" onClick={locateMe} title="Locate my position">
@@ -473,7 +573,14 @@ export default function WindyMap({ onSwitchToMap }) {
       {cardOpen && tap && (
         <aside className="map-data-card" aria-live="polite">
           <div className="map-data-card-header">
-            <strong>📌 {tap.lat.toFixed(4)}°, {tap.lon.toFixed(4)}°</strong>
+            <div>
+              <strong>📌 {tap.label || `${tap.lat.toFixed(4)}°, ${tap.lon.toFixed(4)}°`}</strong>
+              {tap.accuracy && (
+                <small style={{ display: 'block', fontSize: '11px', color: tap.accuracy > 3000 ? '#b45309' : '#64748b' }}>
+                  GPS accuracy: ±{tap.accuracy > 1000 ? `${(tap.accuracy / 1000).toFixed(1)} km (approx. IP location — use Search for exact city)` : `${Math.round(tap.accuracy)} m`}
+                </small>
+              )}
+            </div>
             <button
               type="button"
               className="map-data-card-close"
@@ -483,6 +590,7 @@ export default function WindyMap({ onSwitchToMap }) {
               ✕
             </button>
           </div>
+          {searchError && <p className="card-status-text error">{searchError}</p>}
 
           {loading && <p className="card-status-text">Fetching live weather telemetry & AI risk model…</p>}
 
@@ -616,10 +724,27 @@ export default function WindyMap({ onSwitchToMap }) {
             </div>
           )}
 
+          {/* ── Windy Point Forecast (when VITE_WINDY_POINT_FORECAST_KEY is configured) ── */}
+          {!loading && windyPointForecast && windyPointForecast.length > 0 && (
+            <div className="card-data-section">
+              <span className="card-section-title">🌬️ Windy Point Forecast (GFS Hourly)</span>
+              <div className="forecast-daily-list">
+                {windyPointForecast.map((slot) => (
+                  <div key={slot.time} className="forecast-day-row">
+                    <span className="forecast-date">{slot.time}</span>
+                    <span className="forecast-cond">💨 {fmt(slot.windKmh, ' km/h')}</span>
+                    <span className="forecast-temps">{fmt(slot.tempC, '°C')}</span>
+                    {slot.rainMm > 0 && <span className="forecast-rain">🌧️ {slot.rainMm.toFixed(1)} mm</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* ── 5-Day Daily Forecast List (if available) ── */}
           {!loading && forecast && forecast.days && forecast.days.length > 0 && (
             <div className="card-data-section">
-              <span className="card-section-title">📅 5-Day Forecast</span>
+              <span className="card-section-title">📅 5-Day Point Forecast ({forecast.provider || 'Forecast'})</span>
               <div className="forecast-daily-list">
                 {forecast.days.map((day) => (
                   <div key={day.date} className="forecast-day-row">

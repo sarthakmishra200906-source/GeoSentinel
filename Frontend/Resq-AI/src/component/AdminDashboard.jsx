@@ -36,6 +36,8 @@ export default function AdminDashboard({ token, activeSection = 'overview' }) {
   const [health, setHealth] = useState(null)
   const [weatherDashboard, setWeatherDashboard] = useState(null)
   const [stateReport, setStateReport] = useState(null)
+  const [weatherError, setWeatherError] = useState('')
+  const [weatherLoading, setWeatherLoading] = useState(false)
   const [trendReport, setTrendReport] = useState(null)
   const [selectedState, setSelectedState] = useState('')
   const [notificationForm, setNotificationForm] = useState({
@@ -67,8 +69,35 @@ export default function AdminDashboard({ token, activeSection = 'overview' }) {
   })
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token])
+
+  const loadWeatherAndStates = useCallback(async () => {
+    setWeatherLoading(true)
+    setWeatherError('')
+    try {
+      const [weatherRes, stateRes] = await Promise.allSettled([
+        fetch(`${API_URL}/weather/dashboard`),
+        fetch(`${API_URL}/weather/states`),
+      ])
+      if (weatherRes.status === 'fulfilled' && weatherRes.value.ok) {
+        setWeatherDashboard(await weatherRes.value.json())
+      } else {
+        setWeatherError('Live weather dashboard is temporarily unavailable.')
+      }
+      if (stateRes.status === 'fulfilled' && stateRes.value.ok) {
+        setStateReport(await stateRes.value.json())
+      } else {
+        setWeatherError((prev) => prev || 'State weather telemetry is temporarily unavailable.')
+      }
+    } catch (err) {
+      setWeatherError(err.message || 'Unable to reach weather service.')
+    } finally {
+      setWeatherLoading(false)
+    }
+  }, [])
+
   const load = useCallback(async () => {
-    const [guidelineResponse, verificationResponse, userApprovalResponse, centersResponse, reportsResponse, auditResponse, healthResponse, weatherResponse, stateResponse] =
+    loadWeatherAndStates()
+    const [guidelineResponse, verificationResponse, userApprovalResponse, centersResponse, reportsResponse, auditResponse, healthResponse] =
       await Promise.all([
         fetch(`${API_URL}/admin/guidelines`, { headers }),
         fetch(`${API_URL}/admin/verifications`, { headers }),
@@ -77,8 +106,6 @@ export default function AdminDashboard({ token, activeSection = 'overview' }) {
         fetch(`${API_URL}/reports?limit=50`, { headers }),
         fetch(`${API_URL}/admin/audit`, { headers }),
         fetch(`${API_URL}/admin/health`, { headers }),
-        fetch(`${API_URL}/weather/dashboard`),
-        fetch(`${API_URL}/weather/states`),
       ])
     if (!guidelineResponse.ok || !verificationResponse.ok || !userApprovalResponse.ok || !reportsResponse.ok || !auditResponse.ok)
       throw new Error('Unable to load admin data')
@@ -92,9 +119,7 @@ export default function AdminDashboard({ token, activeSection = 'overview' }) {
     setHasMoreHelpReports(Array.isArray(reportData) ? false : Boolean(reportData.hasMore))
     setAuditEvents(await auditResponse.json())
     setHealth(healthResponse.ok ? await healthResponse.json() : null)
-    setWeatherDashboard(weatherResponse.ok ? await weatherResponse.json() : null)
-    setStateReport(stateResponse.ok ? await stateResponse.json() : null)
-  }, [headers])
+  }, [headers, loadWeatherAndStates])
 
   useEffect(() => {
     const state = selectedState || stateReport?.states?.[0]?.state
@@ -495,10 +520,20 @@ export default function AdminDashboard({ token, activeSection = 'overview' }) {
             </select>
           </label>
           <div className="analytics-actions">
+            <button type="button" onClick={loadWeatherAndStates} disabled={weatherLoading}>
+              {weatherLoading ? 'Refreshing…' : '🔄 Refresh State Weather'}
+            </button>
             <button type="button" onClick={() => window.print()}>Print report</button>
             <button type="button" onClick={exportTrendCsv} disabled={!trendReport?.months?.length}>Export CSV</button>
           </div>
         </div>
+        {weatherLoading && !stateReport && <p>Loading live state weather matrix…</p>}
+        {!weatherLoading && !stateReport && (
+          <p className="form-error">
+            {weatherError || 'State weather matrix is currently unavailable.'}{' '}
+            <button type="button" className="btn-inline-retry" onClick={loadWeatherAndStates}>Retry</button>
+          </p>
+        )}
         {trendReport?.months?.length > 0 && (
           <div className="analytics-chart-grid">
             <div className="analytics-chart">

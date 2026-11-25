@@ -88,6 +88,9 @@ export default class MapComponent extends Component {
     prediction: null,
     loading: false,
     cardOpen: false,
+    searchQuery: '',
+    searching: false,
+    searchError: '',
   }
 
   componentDidMount() {
@@ -109,14 +112,15 @@ export default class MapComponent extends Component {
     }
   }
 
-  fetchRiskAndWeather = async (latitude, longitude) => {
+  fetchRiskAndWeather = async (latitude, longitude, label = '', accuracy = null) => {
     this.setState({
-      selectedLocation: { latitude, longitude },
+      selectedLocation: { latitude, longitude, label, accuracy },
       cardOpen: true,
       loading: true,
       weather: null,
       forecast: null,
       prediction: null,
+      searchError: '',
     })
 
     try {
@@ -160,12 +164,39 @@ export default class MapComponent extends Component {
     }
   }
 
-  handleUserLocated = (lat, lon) => {
-    this.setState({ userLocation: { latitude: lat, longitude: lon } })
+  handleUserLocated = (lat, lon, accuracy = null) => {
+    this.setState({ userLocation: { latitude: lat, longitude: lon, accuracy } })
     if (this.mapInstance) {
       this.mapInstance.flyTo([lat, lon], Math.max(this.mapInstance.getZoom(), 12))
     }
-    this.fetchRiskAndWeather(lat, lon)
+    this.fetchRiskAndWeather(lat, lon, 'Your Current Location', accuracy)
+  }
+
+  searchPlace = async (event) => {
+    event.preventDefault()
+    const q = this.state.searchQuery.trim()
+    if (!q) return
+    this.setState({ searching: true, searchError: '' })
+    try {
+      const res = await fetch(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=1&language=en&format=json`,
+      )
+      const data = await res.json()
+      const hit = data?.results?.[0]
+      if (!hit) {
+        this.setState({ searchError: `Location "${q}" not found.` })
+        return
+      }
+      const label = [hit.name, hit.admin1, hit.country].filter(Boolean).join(', ')
+      if (this.mapInstance) {
+        this.mapInstance.flyTo([hit.latitude, hit.longitude], 11)
+      }
+      this.fetchRiskAndWeather(hit.latitude, hit.longitude, label)
+    } catch {
+      this.setState({ searchError: 'Search unavailable right now.' })
+    } finally {
+      this.setState({ searching: false })
+    }
   }
 
   locateMe = () => {
@@ -175,13 +206,13 @@ export default class MapComponent extends Component {
     }
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
-        this.handleUserLocated(coords.latitude, coords.longitude)
+        this.handleUserLocated(coords.latitude, coords.longitude, coords.accuracy)
       },
       (error) => {
         console.error('Geolocation error:', error)
-        alert('Unable to retrieve your location. Please check browser permissions.')
+        alert('Unable to retrieve your location. Check browser permissions or use the city search bar.')
       },
-      { enableHighAccuracy: true, timeout: 10000 },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     )
   }
 
@@ -202,13 +233,24 @@ export default class MapComponent extends Component {
     if (mapProvider === 'windy') {
       return (
         <div className="map-background">
-          <WindyMap onSwitchToMap={() => this.setState({ mapProvider: 'street' })} />
+          <WindyMap
+            sharedLocation={selectedLocation}
+            onLocationChange={(loc) => this.setState({ selectedLocation: loc })}
+            onSwitchToMap={() => {
+              this.setState({ mapProvider: 'street' })
+              if (selectedLocation) {
+                this.fetchRiskAndWeather(selectedLocation.latitude, selectedLocation.longitude, selectedLocation.label || '', selectedLocation.accuracy || null)
+              }
+            }}
+          />
         </div>
       )
     }
 
     // Standard Clean Street Map (OpenStreetMap) with City Weather Hubs
-    const defaultPosition = [20.5937, 78.9629]
+    const defaultPosition = selectedLocation
+      ? [selectedLocation.latitude, selectedLocation.longitude]
+      : [20.5937, 78.9629]
 
     return (
       <div className="map-background">
@@ -218,6 +260,18 @@ export default class MapComponent extends Component {
           <div className="btn-control-toggle" style={{ cursor: 'default' }}>
             🏙️ Cities Weather ({weatherPoints.length})
           </div>
+
+          {/* Search Place */}
+          <form className="map-place-search" onSubmit={this.searchPlace}>
+            <input
+              type="search"
+              value={this.state.searchQuery}
+              onChange={(e) => this.setState({ searchQuery: e.target.value })}
+              placeholder="Search city or place…"
+              aria-label="Search city or place"
+            />
+            <button type="submit" disabled={this.state.searching}>{this.state.searching ? '…' : '🔍'}</button>
+          </form>
 
           {/* My Location button */}
           <button
@@ -244,7 +298,14 @@ export default class MapComponent extends Component {
         {cardOpen && selectedLocation && (
           <aside className="map-data-card" aria-live="polite">
             <div className="map-data-card-header">
-              <strong>📌 {selectedLocation.latitude.toFixed(4)}°, {selectedLocation.longitude.toFixed(4)}°</strong>
+              <div>
+                <strong>📌 {selectedLocation.label || `${selectedLocation.latitude.toFixed(4)}°, ${selectedLocation.longitude.toFixed(4)}°`}</strong>
+                {selectedLocation.accuracy && (
+                  <small style={{ display: 'block', fontSize: '11px', color: selectedLocation.accuracy > 3000 ? '#b45309' : '#64748b' }}>
+                    GPS accuracy: ±{selectedLocation.accuracy > 1000 ? `${(selectedLocation.accuracy / 1000).toFixed(1)} km (approx. IP location — use Search for exact city)` : `${Math.round(selectedLocation.accuracy)} m`}
+                  </small>
+                )}
+              </div>
               <button
                 type="button"
                 className="map-data-card-close"
@@ -254,6 +315,7 @@ export default class MapComponent extends Component {
                 ✕
               </button>
             </div>
+            {this.state.searchError && <p className="card-status-text error">{this.state.searchError}</p>}
 
             {loading && <p className="card-status-text">Fetching live weather telemetry & AI risk model…</p>}
 

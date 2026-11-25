@@ -2952,6 +2952,54 @@ body,
   max-height: 180px;
 }
 
+/* Map Place Search Pill */
+.map-place-search {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  padding: 2px 6px 2px 12px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+}
+
+.map-place-search input {
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 0.82rem;
+  color: #0f172a;
+  width: 145px;
+}
+
+.map-place-search button {
+  border: none;
+  background: #0ea5e9;
+  color: #fff;
+  border-radius: 999px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
+.map-place-search button:hover {
+  background: #0284c7;
+}
+
+.btn-inline-retry {
+  margin-left: 8px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #dc2626;
+  background: #fff;
+  color: #dc2626;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .form-error {
   color: #b91c1c;
 }
