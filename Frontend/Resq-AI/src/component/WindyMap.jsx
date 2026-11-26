@@ -75,7 +75,7 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
   }, [])
 
   // ── Fetch global or India-region tropical systems ────────────────────────
-  const fetchStorms = useCallback(async (showLoading = false) => {
+  const fetchStorms = useCallback(async (showLoading = false, attempt = 0) => {
     if (showLoading) setStormFeedLoading(true)
     try {
       const res = await fetch(`${API_URL}/weather/storms?scope=${stormScope}`)
@@ -85,6 +85,9 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
         setStorms(Array.isArray(data.tracks) ? data.tracks : [])
       } else {
         setStorms([])
+        if (attempt === 0) {
+          window.setTimeout(() => fetchStorms(false, 1), 3500)
+        }
       }
       setStormFeed({
         available: data.available === true,
@@ -92,17 +95,20 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
         fetchedAt: data.fetchedAt || null,
         scope: data.scope || stormScope,
         source: data.source || '',
-        error: data.available === true ? null : data.error || 'Live cyclone feed is unavailable',
+        error: null,
       })
     } catch (error) {
       console.warn('Unable to load cyclone data:', error)
+      if (attempt === 0) {
+        window.setTimeout(() => fetchStorms(false, 1), 3500)
+      }
       setStormFeed({
         available: false,
-        status: 'unavailable',
+        status: attempt === 0 ? 'loading' : 'unavailable',
         fetchedAt: null,
         scope: stormScope,
         source: '',
-        error: error.message || 'Live cyclone feed is unavailable',
+        error: null,
       })
     } finally {
       if (showLoading) setStormFeedLoading(false)
@@ -467,10 +473,13 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
           </button>
         </div>
 
-        {!stormFeed.available ? (
-          <p className="cyclone-analysis-status error">
-            Feed unavailable. The map cannot confirm whether a cyclone is active.
-            {stormFeed.error ? ` ${stormFeed.error}` : ''}
+        {stormFeed.status === 'loading' || stormFeedLoading ? (
+          <p className="cyclone-analysis-status">
+            Checking live cyclone feeds…
+          </p>
+        ) : !stormFeed.available ? (
+          <p className="cyclone-analysis-status">
+            Live cyclone feed is temporarily unavailable. Click Refresh to retry.
           </p>
         ) : storms.length === 0 ? (
           <p className="cyclone-analysis-status">

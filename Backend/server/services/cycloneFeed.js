@@ -369,7 +369,7 @@ export function createCycloneFeed({ fetchImpl = globalThis.fetch, now = Date.now
       try {
         const payload = await nhcResult.value.json()
         const parsed = parseNhcCurrent(payload, currentTime)
-        if (parsed.length) sources.push('NHC')
+        if (payload && typeof payload === 'object') sources.push('NHC')
         tracks.push(...parsed)
       } catch { /* provider payload was not usable */ }
     }
@@ -380,7 +380,7 @@ export function createCycloneFeed({ fetchImpl = globalThis.fetch, now = Date.now
       try {
         const text = await result.value.text()
         const parsed = parseAtcfText(text, ATCF_SOURCES[index], currentTime)
-        if (parsed.length && !sources.includes(ATCF_SOURCES[index].id)) sources.push(ATCF_SOURCES[index].id)
+        if (typeof text === 'string' && !sources.includes(ATCF_SOURCES[index].id)) sources.push(ATCF_SOURCES[index].id)
         tracks.push(...parsed)
       } catch { /* provider payload was not usable */ }
     }))
