@@ -335,6 +335,19 @@
             }).filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lon))
             if (!samples.length) throw new Error('No rain-probability samples returned')
 
+            // Only shade blue when the API actually reports a chance of rain.
+            // With no meaningful data the map simply stays grey.
+            const peak = Math.max(...samples.map((s) => s.probability))
+            if (peak < 10) {
+              if (rainHeatOverlay) {
+                map.removeLayer(rainHeatOverlay)
+                rainHeatOverlay = null
+              }
+              rainHeatBoundsKey = ''
+              updateIndicator('<span>🌧️ Rain map — no rain expected</span>', '#0284c7')
+              return
+            }
+
             const dataUrl = renderRainField(samples, south, north, west, east)
             if (token !== rainHeatToken || !rainHeatActive) return
 
@@ -346,19 +359,19 @@
             }).addTo(map)
             rainHeatBoundsKey = key
 
-            const peak = Math.max(...samples.map((s) => s.probability))
             updateIndicator(
               `<span>🌧️ Chance of rain (24h):</span> <span class="rain-legend-bar"></span> <span>None → Likely · peak ${peak.toFixed(0)}%</span>`,
               '#0284c7',
             )
           } catch (err) {
             if (token !== rainHeatToken) return
-            console.warn('[Rain] Could not build rainfall heat field:', err)
+            console.warn('[Rain] Rain data unavailable, keeping grey map:', err)
             if (rainHeatOverlay) {
               map.removeLayer(rainHeatOverlay)
               rainHeatOverlay = null
             }
-            updateIndicator('<span>🌧️ Rain field unavailable — check connection</span>', '#b91c1c')
+            rainHeatBoundsKey = ''
+            updateIndicator('<span>🌧️ Rain map — data unavailable</span>', '#0284c7')
           }
         }
 
