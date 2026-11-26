@@ -3,6 +3,9 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { API_URL } from '../api'
 const BASE_URL = import.meta.env.BASE_URL || '/'
 const WINDY_VIEWER_URL = `${BASE_URL.endsWith('/') ? BASE_URL : `${BASE_URL}/`}windy.html`
+// Bump once per app load so the iframe never serves a stale cached viewer
+// (e.g. an older rain implementation) after a local edit or deployment.
+const WINDY_VIEWER_VERSION = Date.now()
 const WINDY_MAP_KEY = import.meta.env.VITE_WINDY_MAP_FORECAST_KEY
 const WINDY_POINT_KEY = import.meta.env.VITE_WINDY_POINT_FORECAST_KEY
 
@@ -61,7 +64,7 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
   const [searching, setSearching] = useState(false)
 
   const hasWindyMapKey = isConfiguredKey(WINDY_MAP_KEY)
-  const viewerUrl = `${WINDY_VIEWER_URL}?key=${encodeURIComponent(hasWindyMapKey ? WINDY_MAP_KEY.trim() : '')}`
+  const viewerUrl = `${WINDY_VIEWER_URL}?key=${encodeURIComponent(hasWindyMapKey ? WINDY_MAP_KEY.trim() : '')}&v=${WINDY_VIEWER_VERSION}`
 
   // ── Send postMessage to Windy iframe helper ────────────────────────────────
   const postToIframe = useCallback((payload) => {
