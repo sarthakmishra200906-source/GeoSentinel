@@ -113,7 +113,7 @@
         width: 96px;
         height: 8px;
         border-radius: 3px;
-        background: linear-gradient(to right, #0c2f4a, #0e7490, #10b981, #eab308, #f97316, #dc2626, #7e22ce);
+        background: linear-gradient(to right, #1f2937, #7dd3fc, #38bdf8, #0284c7, #1e3a8a);
       }
     </style>
     <script src="https://unpkg.com/leaflet@1.4.0/dist/leaflet.js"></script>
@@ -190,35 +190,34 @@
           map.on('moveend zoomend', () => scheduleRainField())
         }
 
-        // The Windy API key only unlocks wind/temp/pressure, so rain is drawn
-        // as a real Open-Meteo precipitation heat field that colours the WHOLE
-        // map, in the same continuous-colour style as the temperature overlay.
-        // Unlike raw satellite tiles this never leaves dry areas blank/grey.
-        const RAIN_STOPS = [
-          [0, [12, 47, 74]],       // dry
-          [0.8, [14, 116, 144]],   // trace
-          [3, [16, 185, 129]],     // light
-          [10, [234, 179, 8]],     // moderate
-          [30, [249, 115, 22]],    // heavy
-          [70, [220, 38, 38]],     // very heavy
-          [150, [126, 34, 206]],   // extreme
+        // Rain = grey base map with blue shading ONLY where there is a real
+        // chance of rain. Probability comes from Open-Meteo (next 24 hours).
+        // No probability -> fully transparent, so the map stays grey.
+        const BLUE_STOPS = [
+          [0, [125, 211, 252]],
+          [0.4, [56, 189, 248]],
+          [0.75, [2, 132, 199]],
+          [1, [30, 58, 138]],
         ]
 
-        function rainColor(mm) {
-          if (!Number.isFinite(mm) || mm <= 0) return RAIN_STOPS[0][1]
-          for (let i = 1; i < RAIN_STOPS.length; i += 1) {
-            const [hiMm, hiColor] = RAIN_STOPS[i]
-            if (mm <= hiMm) {
-              const [loMm, loColor] = RAIN_STOPS[i - 1]
-              const t = (mm - loMm) / (hiMm - loMm)
-              return [
-                Math.round(loColor[0] + (hiColor[0] - loColor[0]) * t),
-                Math.round(loColor[1] + (hiColor[1] - loColor[1]) * t),
-                Math.round(loColor[2] + (hiColor[2] - loColor[2]) * t),
-              ]
+        function rainBlue(probability) {
+          if (!Number.isFinite(probability) || probability <= 8) return [0, 0, 0, 0]
+          const t = Math.min(1, Math.max(0, (probability - 8) / 92))
+          let lo = BLUE_STOPS[0]
+          let hi = BLUE_STOPS[BLUE_STOPS.length - 1]
+          for (let i = 1; i < BLUE_STOPS.length; i += 1) {
+            if (t <= BLUE_STOPS[i][0]) {
+              lo = BLUE_STOPS[i - 1]
+              hi = BLUE_STOPS[i]
+              break
             }
           }
-          return RAIN_STOPS[RAIN_STOPS.length - 1][1]
+          const localT = hi[0] === lo[0] ? 0 : (t - lo[0]) / (hi[0] - lo[0])
+          const r = Math.round(lo[1][0] + (hi[1][0] - lo[1][0]) * localT)
+          const g = Math.round(lo[1][1] + (hi[1][1] - lo[1][1]) * localT)
+          const b = Math.round(lo[1][2] + (hi[1][2] - lo[1][2]) * localT)
+          const alpha = Math.round(255 * Math.min(0.92, 0.16 + (probability - 8) / 55))
+          return [r, g, b, Math.max(0, alpha)]
         }
 
         function mercY(latDeg) {
@@ -246,7 +245,7 @@
           const points = samples.map((s) => ({
             x: (s.lon - west) / spanLon,
             y: (northY - mercY(s.lat)) / spanY,
-            mm: s.mm,
+            probability: s.probability,
           }))
 
           for (let y = 0; y < fh; y += 1) {
@@ -261,21 +260,21 @@
                 const dy = p.y - py
                 const weight = 1 / (dx * dx + dy * dy + 0.0006)
                 weightSum += weight
-                valueSum += weight * p.mm
+                valueSum += weight * p.probability
               }
-              const mm = weightSum > 0 ? valueSum / weightSum : 0
-              const [r, g, b] = rainColor(mm)
+              const probability = weightSum > 0 ? valueSum / weightSum : 0
+              const [r, g, b, a] = rainBlue(probability)
               const idx = (y * fw + x) * 4
               img.data[idx] = r
               img.data[idx + 1] = g
               img.data[idx + 2] = b
-              img.data[idx + 3] = 255
+              img.data[idx + 3] = a
             }
           }
           ctx.putImageData(img, 0, 0)
 
-          // Upscale with smoothing so the coarse field reads as one continuous
-          // colour ramp, matching the appearance of the temperature heat map.
+          // Upscale with smoothing so low-probability areas stay transparent
+          // and the blue patches have soft, natural edges over the grey map.
           const out = document.createElement('canvas')
           out.width = 640
           out.height = 480
@@ -315,26 +314,26 @@
             }
           }
 
-          updateIndicator('<span>🌧️ Rain field: loading real rainfall data…</span>', '#0284c7')
+          updateIndicator('<span>🌧️ Rain field: loading chance-of-rain data…</span>', '#0284c7')
 
           try {
-            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lats.join(',')}&longitude=${lons.join(',')}&hourly=precipitation&past_days=7&forecast_days=1&timezone=UTC`
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lats.join(',')}&longitude=${lons.join(',')}&hourly=precipitation_probability&forecast_hours=24&timezone=UTC`
             const response = await fetch(url)
-            if (!response.ok) throw new Error(`Rainfall data HTTP ${response.status}`)
+            if (!response.ok) throw new Error(`Rain probability data HTTP ${response.status}`)
             const payload = await response.json()
             if (token !== rainHeatToken || !rainHeatActive) return
 
             const list = Array.isArray(payload) ? payload : [payload]
             const samples = list.map((item, index) => {
-              const values = item?.hourly?.precipitation || []
-              const mm = values.reduce((sum, v) => sum + (Number(v) || 0), 0)
+              const values = item?.hourly?.precipitation_probability || []
+              const probability = values.reduce((max, v) => Math.max(max, Number(v) || 0), 0)
               return {
                 lat: Number(item?.latitude ?? lats[index]),
                 lon: Number(item?.longitude ?? lons[index]),
-                mm,
+                probability,
               }
             }).filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lon))
-            if (!samples.length) throw new Error('No rainfall samples returned')
+            if (!samples.length) throw new Error('No rain-probability samples returned')
 
             const dataUrl = renderRainField(samples, south, north, west, east)
             if (token !== rainHeatToken || !rainHeatActive) return
@@ -347,9 +346,9 @@
             }).addTo(map)
             rainHeatBoundsKey = key
 
-            const peak = Math.max(...samples.map((s) => s.mm))
+            const peak = Math.max(...samples.map((s) => s.probability))
             updateIndicator(
-              `<span>🌧️ Rainfall (7 days):</span> <span class="rain-legend-bar"></span> <span>Dry → Light → Heavy · peak ${peak.toFixed(0)} mm</span>`,
+              `<span>🌧️ Chance of rain (24h):</span> <span class="rain-legend-bar"></span> <span>None → Likely · peak ${peak.toFixed(0)}%</span>`,
               '#0284c7',
             )
           } catch (err) {
