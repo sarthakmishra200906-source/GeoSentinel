@@ -452,6 +452,34 @@ function compactSourceLabel(source) {
   return source.page ? `${title}, p. ${source.page}` : title
 }
 
+// Voice answers follow the language of the question. A small in-panel selector
+// lets a speaker choose the microphone language before speaking.
+function detectSpokenLanguage(text) {
+  if (/[\u0B00-\u0B7F]/.test(text)) return 'or'
+  if (/[\u0900-\u097F]/.test(text)) return 'hi'
+  return 'en'
+}
+
+const VOICE_LANGUAGE_TAGS = { en: 'en-US', hi: 'hi-IN', or: 'or-IN' }
+
+const CLIENT_SAFETY_FALLBACKS = {
+  en: 'The local connection failed, so no live AI answer is available. For immediate danger, contact your local emergency services and follow local authorities. Move away from flooding, downed power lines and unstable structures, stay in a sturdy shelter during storms, and keep an emergency kit with water, dry food and essential medicines.',
+  hi: 'स्थानीय कनेक्शन विफल है, इसलिए लाइव AI उत्तर उपलब्ध नहीं है। तत्काल खतरे में स्थानीय आपातकालीन सेवाओं से संपर्क करें और स्थानीय अधिकारियों के निर्देशों का पालन करें। बाढ़, गिरे बिजली तारों और असुरक्षित संरचनाओं से दूर रहें, तूफान के दौरान मज़बूत आश्रय में रहें, और पानी, सूखा भोजन तथा आवश्यक दवाओं के साथ आपातकिट रखें।',
+  or: 'ସ୍ଥାନୀୟ ସଂଯୋଗ ବିଫଳ ହୋଇଛି, ତେଣୁ ଲାଇଭ୍ AI ଉତ୍ତର ଉପଲବ୍ଧ ନାହିଁ। ତତ୍କ୍ଷଣ ବିପଦରେ ସ୍ଥାନୀୟ ଜରୁରୀକାଳୀନ ସେବା ସହ ଯୋଗାଯୋଗ କରନ୍ତୁ ଏବଂ ସ୍ଥାନୀୟ ପ୍ରଶାସନର ନିର୍ଦ୍ଦେଶ ପାଳନ କରନ୍ତୁ। ବନ୍ୟା, ପଡ଼ିଥିବା ବିଦ୍ୟୁତ୍ ତାର ଏବଂ ଅସୁରକ୍ଷିତ ଗଠନଠାରୁ ଦୂରେଇ ରୁହନ୍ତୁ, ଝଡ଼ ସମୟରେ ମଜବୁତ ଆଶ୍ରୟସ୍ଥଳରେ ରୁହନ୍ତୁ, ଏବଂ ପାଣି, ଶୁଖିଲା ଖାଦ୍ୟ ଓ ଆବଶ୍ୟକ ଔଷଧ ସହ ଜରୁରୀ କିଟ୍ ରଖନ୍ତୁ।',
+}
+
+function pickFemaleVoice(voices, language) {
+  const femaleName = /zira|aria|jenny|samantha|sonia|kavya|meera|rencha|swara|neerja|female|woman/i
+  const matchingLanguage = voices.filter((voice) =>
+    new RegExp(`^${language}[-_]`, 'i').test(voice.lang || ''),
+  )
+  return matchingLanguage.find((voice) => femaleName.test(voice.name))
+    || voices.find((voice) => femaleName.test(voice.name))
+    || matchingLanguage[0]
+    || voices.find((voice) => /^en[-_]/i.test(voice.lang || ''))
+    || null
+}
+
 class AiPanel extends Component {
   state = {
     message: '',
@@ -461,6 +489,7 @@ class AiPanel extends Component {
     isListening: false,
     isSpeaking: false,
     autoSpeak: true,
+    voiceLanguage: 'en',
     voiceStatus: '',
     apiNotice: '',
     showDiagnostics: false,
@@ -543,7 +572,7 @@ class AiPanel extends Component {
     } catch { /* ignore */ }
 
     const rec = new SpeechRecognition()
-    rec.lang = navigator.language || 'en-US'
+    rec.lang = VOICE_LANGUAGE_TAGS[this.state.voiceLanguage] || navigator.language || 'en-US'
     rec.continuous = true
     rec.interimResults = true
 
@@ -631,7 +660,7 @@ class AiPanel extends Component {
     }
   }
 
-  speakAnswer = (explicitText) => {
+  speakAnswer = (explicitText, explicitLanguage) => {
     const answer = toSpeakableText(explicitText || this.state.response?.answer)
     if (!answer || !window.speechSynthesis || !window.SpeechSynthesisUtterance) {
       this.setState({ error: 'Voice playback is not supported by this browser.' })
@@ -640,13 +669,21 @@ class AiPanel extends Component {
     this.stopSpeaking()
     const token = ++this.speechToken
     const voices = window.speechSynthesis.getVoices?.() || []
-    const preferredVoice = voices.find((voice) => /^en[-_]IN/i.test(voice.lang))
-      || voices.find((voice) => /^en/i.test(voice.lang) && /natural|neural|google/i.test(voice.name))
-      || voices.find((voice) => /^en/i.test(voice.lang))
-      || null
-    // Never force an 'en-IN' language tag when no such voice is installed:
-    // some browsers then select no voice at all and play nothing.
-    const language = preferredVoice?.lang || 'en-US'
+    const answerLanguage = explicitLanguage
+      || this.state.response?.language
+      || detectSpokenLanguage(this.state.response?.userMessage || '')
+      || this.state.voiceLanguage
+    const preferredVoice = pickFemaleVoice(voices, answerLanguage)
+    const hasLanguageVoice = preferredVoice
+      && new RegExp(`^${answerLanguage}[-_]`, 'i').test(preferredVoice.lang || '')
+    if (answerLanguage !== 'en' && !hasLanguageVoice) {
+      this.setState({
+        voiceStatus: `${answerLanguage.toUpperCase()} speech voice is not installed; using the available female voice.`,
+      })
+    }
+    // Use the selected voice's real language tag: forcing an uninstalled tag
+    // makes some browsers refuse to speak at all.
+    const language = preferredVoice?.lang || VOICE_LANGUAGE_TAGS[answerLanguage] || 'en-US'
     this.speechQueue = splitSpeechChunks(answer)
     this.speechIndex = 0
     this.setState({ isSpeaking: true })
@@ -720,13 +757,15 @@ class AiPanel extends Component {
   sendQuery = async (queryText, autoSpeak = this.state.autoSpeak) => {
     const text = (queryText || this.state.message).trim()
     if (!text) return
+    const detectedLanguage = detectSpokenLanguage(text)
+    const language = detectedLanguage === 'en' ? this.state.voiceLanguage : detectedLanguage
 
     this.setState({ error: '', isSending: true })
     try {
       const response = await fetch(`${API_URL}/chat/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, language }),
       })
       const responseText = await response.text()
       let data = null
@@ -757,26 +796,28 @@ class AiPanel extends Component {
       })
 
       if (autoSpeak && chatData.answer) {
-        this.speakAnswer(chatData.answer)
+        this.speakAnswer(chatData.answer, chatData.language)
       }
     } catch (error) {
-      const fallbackAnswer = 'For emergency assistance, dial 112 (National Emergency Helpline). In flood, cyclone, or severe weather events: seek high ground or sturdy indoor shelter, stay away from downed power lines, and keep an emergency go-bag prepared.'
+      const fallbackAnswer = CLIENT_SAFETY_FALLBACKS[language] || CLIENT_SAFETY_FALLBACKS.en
       this.setState({
         response: {
+          language,
           status: 'SAFE_FALLBACK',
           answer: fallbackAnswer,
-          warnings: [error instanceof TypeError ? 'Cannot reach local backend; showing public disaster advisory.' : error.message],
+          warnings: [error instanceof TypeError ? 'Cannot reach local backend; showing general safety guidance.' : error.message],
           sources: [{
             documentId: 'local-emergency-advisory',
-            title: 'National Disaster Preparedness Standards',
-            issuingAuthority: 'NDMA Safety Guidelines',
+            title: 'General Disaster Safety Guidance',
+            issuingAuthority: 'Public safety best practice (not an official order)',
             officialUrl: 'https://ndma.gov.in',
+            label: 'General Disaster Safety Guidance (not in the documents)',
           }],
         },
         error: '',
       })
       if (autoSpeak) {
-        this.speakAnswer(fallbackAnswer)
+        this.speakAnswer(fallbackAnswer, language)
       }
     } finally {
       this.setState({ isSending: false })
@@ -856,6 +897,18 @@ class AiPanel extends Component {
           />
 
           <div className="chat-voice-actions">
+            <label className="chat-voice-language">
+              Voice language
+              <select
+                value={this.state.voiceLanguage}
+                onChange={(event) => this.setState({ voiceLanguage: event.target.value })}
+                disabled={this.state.isListening}
+              >
+                <option value="en">English</option>
+                <option value="or">ଓଡ଼ିଆ</option>
+                <option value="hi">हिन्दी</option>
+              </select>
+            </label>
             <button
               type="button"
               className={`btn-voice ${this.state.isListening ? 'is-active' : ''}`}

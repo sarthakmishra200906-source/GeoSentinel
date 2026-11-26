@@ -1785,6 +1785,47 @@ body,
   line-height: 1.45;
 }
 
+.simulation-brief-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 10px 14px;
+  border: 1px solid #bae6fd;
+  border-radius: 10px;
+  background: linear-gradient(120deg, #f0f9ff, #f8fafc);
+}
+
+.simulation-brief-header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.simulation-brief-header strong {
+  font-size: .9rem;
+}
+
+.simulation-brief-header small {
+  color: #64748b;
+  font-size: .76rem;
+}
+
+.simulation-brief-header button {
+  border: 1px solid #0284c7;
+  border-radius: 8px;
+  padding: 7px 12px;
+  background: #fff;
+  color: #0369a1;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.simulation-brief-header button:disabled {
+  opacity: .6;
+  cursor: wait;
+}
+
 .simulation-hour-table {
   max-height: 360px;
   overflow: auto;
@@ -3111,6 +3152,24 @@ body,
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.chat-voice-language {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .78rem;
+  font-weight: 700;
+  color: #475569;
+}
+
+.chat-voice-language select {
+  border: 1px solid #94a3b8;
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: #fff;
+  color: #1e293b;
+  font-size: .82rem;
 }
 
 .btn-voice {

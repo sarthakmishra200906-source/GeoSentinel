@@ -48,15 +48,12 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
   const [prediction, setPrediction] = useState(null)
   const [loading, setLoading] = useState(false)
   const [activeOverlay, setActiveOverlay] = useState('wind')
-  const [satellite, setSatellite] = useState(false)
-  const [rainRadar, setRainRadar] = useState(false)
   const [showCyclones, setShowCyclones] = useState(true)
   const [stormScope, setStormScope] = useState('global')
   const [storms, setStorms] = useState([])
   const [stormFeed, setStormFeed] = useState({ available: false, status: 'loading', fetchedAt: null, error: null })
   const [analysisStormId, setAnalysisStormId] = useState('')
   const [stormFeedLoading, setStormFeedLoading] = useState(false)
-  const [radarTileUrl, setRadarTileUrl] = useState('')
   const [userLocation, setUserLocation] = useState(sharedLocation ? { lat: sharedLocation.latitude, lon: sharedLocation.longitude, accuracy: sharedLocation.accuracy } : null)
   const [cardOpen, setCardOpen] = useState(Boolean(sharedLocation))
   const [searchQuery, setSearchQuery] = useState('')
@@ -109,42 +106,10 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
     }
   }, [stormScope])
 
-  // ── Fetch rain radar tile endpoint (RainViewer Universal Blue) ───────────
-  const fetchRadarUrl = useCallback(async () => {
-    try {
-      const res = await fetch('https://api.rainviewer.com/public/weather-maps.json')
-      if (res.ok) {
-        const data = await res.json()
-        if (data?.radar?.past?.length > 0) {
-          const latest = data.radar.past[data.radar.past.length - 1]
-          // Color scheme 2 is Universal Blue (standard weather map pure blue precipitation)
-          const url = `${data.host}${latest.path}/256/{z}/{x}/{y}/2/1_1.png`
-          setRadarTileUrl(url)
-        }
-      }
-    } catch {
-      // Fallback default in windy.html
-    }
-  }, [])
-
-  // ── Change Windy forecast overlay (wind / rain / temp / clouds) ────────────
+  // ── Change Windy forecast overlay (wind / rain / temp) ─────────────────────
   const setLayer = (overlay) => {
     setActiveOverlay(overlay)
-    postToIframe({ type: 'change-windy-overlay', overlay, radarTileUrl })
-  }
-
-  // ── Toggle Satellite view on Windy map ─────────────────────────────────────
-  const toggleSatellite = () => {
-    const next = !satellite
-    setSatellite(next)
-    postToIframe({ type: 'toggle-satellite', enabled: next })
-  }
-
-  // ── Toggle Rain Radar (Precipitation Radar tiles) on Windy map ─────────────
-  const toggleRadar = () => {
-    const next = !rainRadar
-    setRainRadar(next)
-    postToIframe({ type: 'toggle-radar', enabled: next, tileUrl: radarTileUrl })
+    postToIframe({ type: 'change-windy-overlay', overlay })
   }
 
   // ── Toggle Cyclones on Windy map ───────────────────────────────────────────
@@ -272,10 +237,6 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
     postToIframe({ type: 'update-cyclones', storms, enabled: showCyclones })
   }, [postToIframe, showCyclones, storms])
 
-  useEffect(() => {
-    fetchRadarUrl()
-  }, [fetchRadarUrl])
-
   // ── Listen for Windy iframe events ─────────────────────────────────────────
   useEffect(() => {
     const handler = (event) => {
@@ -285,13 +246,7 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
       if (data.type === 'windy-ready') {
         // Sync current state to newly initialized Windy instance
         if (activeOverlay) {
-          postToIframe({ type: 'change-windy-overlay', overlay: activeOverlay, radarTileUrl })
-        }
-        if (satellite) {
-          postToIframe({ type: 'toggle-satellite', enabled: true })
-        }
-        if (rainRadar) {
-          postToIframe({ type: 'toggle-radar', enabled: true, tileUrl: radarTileUrl })
+          postToIframe({ type: 'change-windy-overlay', overlay: activeOverlay })
         }
         if (storms.length > 0) {
           postToIframe({ type: 'update-cyclones', storms, enabled: showCyclones })
@@ -309,7 +264,7 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
 
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [activeOverlay, satellite, rainRadar, storms, showCyclones, radarTileUrl, postToIframe, fetchData])
+  }, [activeOverlay, storms, showCyclones, postToIframe, fetchData])
 
   const analysisStorm = storms.find((storm) => storm.id === analysisStormId) || storms[0]
   const analysisCoordinate = analysisStorm?.coordinates?.[analysisStorm.coordinates.length - 1]
@@ -390,46 +345,26 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
         allow="geolocation"
       />
 
-      {/* ── Top controls bar: Overlays, Satellite, Rain, Cyclones, Location ── */}
+      {/* ── Top controls bar: Weather overlays, cyclones and location ──────── */}
       <div className="top-controls-bar" role="toolbar" aria-label="Windy controls">
         {/* Detail Layer toggles: Wind, Rain, Heat/Temp */}
         <div className="windy-layer-group" role="group" aria-label="Weather forecast layers">
           {[
             { key: 'wind', label: '💨 Wind' },
-            { key: 'rain', label: '🌧️ Rain' },
+            { key: 'rain', label: '🌧️ Rain', title: 'Switch to continuous NASA IMERG rain field' },
             { key: 'temp', label: '🌡️ Heat' },
-          ].map(({ key, label }) => (
+          ].map(({ key, label, title }) => (
             <button
               key={key}
               type="button"
               className={`windy-layer-btn${activeOverlay === key ? ' active' : ''}`}
               onClick={() => setLayer(key)}
-              title={`Switch Windy overlay to ${label}`}
+              title={title || `Switch Windy overlay to ${label}`}
             >
               {label}
             </button>
           ))}
         </div>
-
-        {/* Satellite Imagery toggle */}
-        <button
-          type="button"
-          className={`btn-control-toggle${satellite ? ' active' : ''}`}
-          onClick={toggleSatellite}
-          title="Toggle high-resolution satellite imagery on Windy"
-        >
-          {satellite ? '🛰️ NASA Clouds On' : '🛰️ NASA Clouds'}
-        </button>
-
-        {/* RainViewer radar toggle */}
-        <button
-          type="button"
-          className={`btn-control-toggle${rainRadar ? ' active' : ''}`}
-          onClick={toggleRadar}
-          title="Toggle RainViewer precipitation radar"
-        >
-          {rainRadar ? '🌧️ Radar On' : '🌧️ Radar'}
-        </button>
 
         {/* Active Cyclones Worldwide toggle */}
         <button

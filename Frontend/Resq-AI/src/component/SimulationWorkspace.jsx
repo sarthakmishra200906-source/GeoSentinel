@@ -126,6 +126,9 @@ export default function SimulationWorkspace({ token }) {
   const [rescueCenterLayer, setRescueCenterLayer] = useState({ status: 'loading', centers: [], error: '' })
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(() => Boolean(getSelectedRunId()))
+  const [reportBrief, setReportBrief] = useState(null)
+  const [briefLoading, setBriefLoading] = useState(false)
+  const [briefError, setBriefError] = useState('')
 
   const loadRuns = useCallback(async ({ cursor = null, append = false } = {}) => {
     const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
@@ -175,6 +178,7 @@ export default function SimulationWorkspace({ token }) {
     setRun(null)
     setSteps([])
     setStoredReports([])
+    setReportBrief(null)
     setTimelineIndex(-1)
     setPdfPreviewUrl('')
     setMessage('The previous run remains saved in run history. Configure a new scenario and create another isolated run.')
@@ -344,6 +348,7 @@ export default function SimulationWorkspace({ token }) {
       setSteps([])
       setTimelineIndex(-1)
       setStoredReports([])
+      setReportBrief(null)
       setMessage('Simulation ready. Advance one synthetic hour with Step.')
     } catch (error) {
       setMessage(error.message)
@@ -470,14 +475,61 @@ export default function SimulationWorkspace({ token }) {
   const drawnCycloneSegments = splitRouteAtDateLine(cyclonePath)
   const cyclonePosition = selectedStep ? getStepPosition(selectedStep) : routeStart
   const peakStep = steps.reduce((peak, item) => item.impacts.riskScore > peak.impacts.riskScore ? item : peak, steps[0])
-  const totalResourceDemand = selectedStep
+  const totalResourceDemand = useMemo(() => selectedStep
     ? selectedStep.recommendations.resources.reduce((total, item) => ({
         boats: total.boats + item.boats,
         paramedics: total.paramedics + item.paramedics,
         rescueTeams: total.rescueTeams + item.rescueTeams,
       }), { boats: 0, paramedics: 0, rescueTeams: 0 })
-    : { boats: 0, paramedics: 0, rescueTeams: 0 }
+    : { boats: 0, paramedics: 0, rescueTeams: 0 }, [selectedStep])
   const runStamp = run?._id || 'simulation'
+  const briefSignature = `${runStamp}:${steps.length}:${scenario.name}`
+  const generateBrief = useCallback(async () => {
+    if (!steps.length || !peakStep) return
+    setBriefLoading(true)
+    setBriefError('')
+    try {
+      const response = await fetch(`${API_URL}/simulation/brief`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scenarioName: scenario.name,
+          hours: steps.length,
+          startLatitude: Number(scenario.startLatitude),
+          startLongitude: Number(scenario.startLongitude),
+          headingDeg: Number(scenario.headingDeg) || 0,
+          windSpeedKmh: Number(scenario.windSpeedKmh),
+          peakHour: peakStep.sequence,
+          peakRiskTier: peakStep.impacts.riskTier,
+          peakRiskScore: peakStep.impacts.riskScore,
+          peakRainMm: Math.max(...steps.map((item) => item.weather.hourlyRainfallMm)),
+          peakRiverM3s: Math.max(...steps.map((item) => item.weather.riverDischargeM3s)),
+          viewedHour: selectedStep?.sequence ?? peakStep.sequence,
+          resources: totalResourceDemand,
+          landfallHour: expectedTrack?.landfall?.hour ?? null,
+          trackModel: expectedTrack?.trackModel || 'forward_forecast',
+          topDistricts: (peakStep.impacts.districts || []).slice(0, 3).map((district) => ({
+            name: district.district,
+            riskTier: district.riskTier,
+          })),
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to generate AI report brief')
+      setReportBrief(data)
+    } catch (error) {
+      setBriefError(error.message)
+    } finally {
+      setBriefLoading(false)
+    }
+  }, [expectedTrack, headers, peakStep, scenario, selectedStep, steps, totalResourceDemand])
+
+  React.useEffect(() => {
+    if (steps.length > 0) generateBrief()
+    // Regenerate only for a new run or a changed step count, not every scrub.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [briefSignature])
+
   const downloadSummary = () => {
     downloadFile(`${runStamp}-executive-summary.json`, JSON.stringify({
       reportType: 'simulation_executive_summary',
@@ -515,9 +567,12 @@ export default function SimulationWorkspace({ token }) {
       const data = await response.json()
       if (!response.ok && !data._id) throw new Error(data.error || 'Unable to store simulation PDF')
       await loadReports(run._id)
+      if (data._id) {
+        await fetchStoredPdf(data, true)
+      }
       setMessage(data.auditError
         ? data.auditError
-        : `Complete PDF report stored in the database with SHA-256 ${data.sha256}.`)
+        : `Complete PDF report generated, stored, and downloaded with SHA-256 ${data.sha256}.`)
     } catch (error) {
       setMessage(error.message)
     } finally {
@@ -538,7 +593,15 @@ export default function SimulationWorkspace({ token }) {
         const data = await response.json()
         throw new Error(data.error || 'Unable to load stored PDF report')
       }
-      const url = URL.createObjectURL(await response.blob())
+      const contentType = response.headers.get('content-type') || ''
+      if (!contentType.includes('application/pdf')) {
+        throw new Error('The server returned a non-PDF response; no file was saved.')
+      }
+      const blob = await response.blob()
+      if (blob.type && !blob.type.includes('application/pdf')) {
+        throw new Error('The downloaded file is not a valid PDF; no file was saved.')
+      }
+      const url = URL.createObjectURL(blob)
       if (download) {
         const link = document.createElement('a')
         link.href = url
@@ -657,7 +720,7 @@ export default function SimulationWorkspace({ token }) {
                 <div className="simulation-run-item" key={savedRun._id}>
                   <span><strong>{savedRun.scenario?.name || 'Scenario'}</strong> · H{savedRun.sequence} · {savedRun.status}</span>
                   <button type="button" onClick={() => loadRun(savedRun._id)} disabled={busy} aria-label={`View ${savedRun.scenario?.name || 'simulation'} run`}>View</button>
-                  <button type="button" onClick={() => downloadRun(savedRun)} disabled={busy} aria-label={`Download ${savedRun.scenario?.name || 'simulation'} run`}>Download</button>
+                  <button type="button" onClick={() => downloadRun(savedRun)} disabled={busy} aria-label={`Download ${savedRun.scenario?.name || 'simulation'} evidence JSON`}>Evidence JSON</button>
                   <button type="button" onClick={() => deleteRun(savedRun)} disabled={busy} aria-label={`Delete ${savedRun.scenario?.name || 'simulation'} run`}>Delete</button>
                 </div>
               ))}
@@ -860,7 +923,7 @@ export default function SimulationWorkspace({ token }) {
         <div className="simulation-chart-card">
           <div className="simulation-map-heading">
             <strong>Hourly simulation insights</strong>
-            <button type="button" onClick={createStoredPdf} disabled={busy}>Generate &amp; store complete PDF</button>
+            <button type="button" onClick={createStoredPdf} disabled={busy}>Generate, store &amp; download PDF</button>
           </div>
           <div className="simulation-chart">
             <Line
@@ -891,7 +954,7 @@ export default function SimulationWorkspace({ token }) {
               <button type="button" onClick={downloadSummary}>Download executive summary</button>
               <button type="button" onClick={downloadHourly}>Download hourly telemetry</button>
               <button type="button" onClick={downloadStateImpacts}>Download India state impacts</button>
-              <button type="button" onClick={createStoredPdf} disabled={busy}>Generate &amp; store full PDF</button>
+              <button type="button" onClick={createStoredPdf} disabled={busy}>Generate, store &amp; download PDF</button>
             </div>
           </div>
           <div className="simulation-stored-reports">
@@ -928,21 +991,34 @@ export default function SimulationWorkspace({ token }) {
             <div><span>Peak river discharge proxy</span><strong>{Math.max(...steps.map((item) => item.weather.riverDischargeM3s)).toFixed(1)} m³/s</strong><small>Not a gauge reading</small></div>
             <div><span>Resource advice at viewed hour</span><strong>{totalResourceDemand.rescueTeams} teams</strong><small>{totalResourceDemand.boats} boats · {totalResourceDemand.paramedics} paramedics</small></div>
           </div>
+          <div className="simulation-brief-header">
+            <div>
+              <span className="eyebrow">Local AI decision brief</span>
+              <strong>{briefLoading ? 'Ollama is writing the brief…' : 'Ollama-written rehearsal summary'}</strong>
+              <small>
+                {reportBrief?.model || 'llama3.1:8b'} · {reportBrief?.source === 'ollama' ? 'generated from these run facts' : 'safe deterministic summary'}
+              </small>
+            </div>
+            <button type="button" onClick={generateBrief} disabled={briefLoading}>
+              {briefLoading ? 'Generating…' : 'Regenerate brief'}
+            </button>
+          </div>
+          {briefError && <p className="form-warning">Brief unavailable: {briefError}. Showing the rule-matrix summary instead.</p>}
           <div className="simulation-outcome-columns">
             <div className="simulation-outcome-card">
               <h5>User help / reports</h5>
-              <strong>Not connected to this isolated run</strong>
-              <p>No public SOS, help message, notification, or citizen report was created. A live incident inbox must be tested separately before operational use.</p>
+              <strong>{reportBrief?.userHelp ? 'Incident inbox check' : 'Not connected to this isolated run'}</strong>
+              <p>{reportBrief?.userHelp || 'No public SOS, help message, notification, or citizen report was created. A live incident inbox must be tested separately before operational use.'}</p>
             </div>
             <div className="simulation-outcome-card">
               <h5>AI insight</h5>
-              <strong>Rule-matrix explanation only</strong>
-              <p>{selectedStep?.recommendations.rationale} This run did not send synthetic data to grounded AI chat or claim an AI forecast.</p>
+              <strong>{reportBrief?.aiInsight ? 'Synthetic risk explanation' : 'Rule-matrix explanation only'}</strong>
+              <p>{reportBrief?.aiInsight || `${selectedStep?.recommendations.rationale || ''} This run did not send synthetic data to grounded AI chat or claim an AI forecast.`}</p>
             </div>
             <div className="simulation-outcome-card">
               <h5>Final review</h5>
-              <strong>What to improve</strong>
-              <p>Validate against gauges and verified incident data, add resource reservations, connect approved live telemetry, and generate server-signed reports before deployment.</p>
+              <strong>{reportBrief?.finalReview ? 'Before operational use' : 'What to improve'}</strong>
+              <p>{reportBrief?.finalReview || 'Validate against gauges and verified incident data, add resource reservations, connect approved live telemetry, and generate server-signed reports before deployment.'}</p>
             </div>
           </div>
           {selectedStep && <div className="simulation-hour-table">

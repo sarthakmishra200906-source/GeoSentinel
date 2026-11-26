@@ -12,10 +12,22 @@ import { calculateSimulationStep, projectForwardTrack } from '../services/simula
 import { buildSimulationPdf, createSimulationReportSummary } from '../services/simulationPdfReport.js'
 import { deleteSimulationRunData } from '../services/simulationRunDeletion.js'
 import { deleteSimulationReport } from '../services/simulationReportDeletion.js'
+import { generateSimulationBrief } from '../services/reportBriefService.js'
 
 const router = Router()
 const RUN_PAGE_SIZE = 50
 const MAX_PDF_BYTES = 12 * 1024 * 1024
+
+// Ollama writes the three short dashboard cards from whitelisted rehearsal
+// facts. It never receives live reports, addresses or phone numbers.
+router.post('/brief', ...requireAdmin, async (request, response, next) => {
+  try {
+    const brief = await generateSimulationBrief(request.body || {})
+    response.json({ ...brief, generatedAt: new Date().toISOString() })
+  } catch (error) {
+    next(error)
+  }
+})
 
 // Open-Meteo upper-air winds are reported as "direction the wind comes from".
 // A tropical system is steered in the opposite direction, so we add 180 degrees
@@ -135,6 +147,44 @@ function reportMetadata(report) {
   return metadata
 }
 
+// The PDF brief receives the same whitelisted rehearsal facts as the dashboard
+// cards. It never receives citizen reports, addresses or phone numbers.
+function reportBriefPayload(run, timesteps) {
+  const parameters = run.scenario?.parameters || {}
+  const cyclone = parameters.cyclone || {}
+  const peak = timesteps.reduce(
+    (current, item) => !current || item.impacts.riskScore > current.impacts.riskScore ? item : current,
+    null,
+  )
+  const landfall = timesteps.find((item) => item.cyclone?.isLandfall)
+  const resources = (peak?.recommendations?.resources || []).reduce((total, item) => ({
+    rescueTeams: total.rescueTeams + (item.rescueTeams || 0),
+    boats: total.boats + (item.boats || 0),
+    paramedics: total.paramedics + (item.paramedics || 0),
+  }), { rescueTeams: 0, boats: 0, paramedics: 0 })
+  return {
+    scenarioName: run.scenario?.name || 'Cyclone rehearsal',
+    hours: timesteps.length,
+    startLatitude: cyclone.startLatitude,
+    startLongitude: cyclone.startLongitude,
+    headingDeg: cyclone.headingDeg === 'auto' ? 0 : cyclone.headingDeg,
+    windSpeedKmh: cyclone.windSpeedKmh,
+    peakHour: peak?.sequence,
+    peakRiskTier: peak?.impacts.riskTier,
+    peakRiskScore: peak?.impacts.riskScore,
+    peakRainMm: timesteps.reduce((max, item) => Math.max(max, item.weather?.hourlyRainfallMm || 0), 0),
+    peakRiverM3s: timesteps.reduce((max, item) => Math.max(max, item.weather?.riverDischargeM3s || 0), 0),
+    viewedHour: peak?.sequence,
+    resources,
+    landfallHour: landfall?.sequence ?? null,
+    trackModel: run.scenario?.dataSource || 'synthetic_simulation',
+    topDistricts: (peak?.impacts?.districts || []).slice(0, 3).map((district) => ({
+      name: district.district,
+      riskTier: district.riskTier,
+    })),
+  }
+}
+
 function decodeRunCursor(cursor) {
   if (!cursor) return null
   try {
@@ -149,11 +199,13 @@ function decodeRunCursor(cursor) {
 
 async function storeCompletePdf(run, timesteps, owner, request) {
   const generatedAt = new Date()
+  const brief = await generateSimulationBrief(reportBriefPayload(run, timesteps))
   const pdf = await buildSimulationPdf({
     run,
     scenario: run.scenario,
     timesteps,
     generatedAt,
+    brief,
   })
   if (pdf.length > MAX_PDF_BYTES) {
     const error = new Error('Generated PDF exceeds the MongoDB document storage limit; export is not stored')
@@ -168,7 +220,15 @@ async function storeCompletePdf(run, timesteps, owner, request) {
     fileName,
     sha256: crypto.createHash('sha256').update(pdf).digest('hex'),
     generatedAt,
-    summary: createSimulationReportSummary(timesteps),
+    summary: {
+      ...createSimulationReportSummary(timesteps),
+      brief: {
+        source: brief.source,
+        provider: brief.provider,
+        model: brief.model,
+        warning: brief.warning || null,
+      },
+    },
     pdf,
   })
   let auditError = null

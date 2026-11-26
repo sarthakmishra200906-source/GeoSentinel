@@ -12,9 +12,12 @@ import {
 import { requireAuth, requirePhoneVerification } from '../middleware/auth.js'
 
 const router = Router()
+// Login/register traffic is bursty when a training cohort signs in together.
+// The limit stays configurable so a deployment can tighten it if needed.
+const configuredAuthLimit = Number(process.env.AUTH_RATE_LIMIT)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 20,
+  limit: Number.isFinite(configuredAuthLimit) && configuredAuthLimit > 0 ? configuredAuthLimit : 200,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   handler: (_request, response) => response.status(429).json({ error: 'Too many authentication attempts. Try again later.' }),

@@ -132,8 +132,7 @@
       } else {
         const pendingMessages = []
         let windyInstance = null
-        let satelliteLayer = null
-        let radarLayer = null
+        let rainFieldLayer = null
         let cycloneLayerGroup = null
         let cycloneMarkersMap = new Map()
 
@@ -182,60 +181,35 @@
           }
         }
 
-        function setSatellite(enabled) {
+        // The Windy API key used by this deployment only unlocks wind, temp and
+        // pressure overlays, so the rain layer is drawn from NASA GIBS IMERG as
+        // a continuous colour-ramped precipitation-rate field.
+        function setRainField(enabled) {
           if (!windyInstance || !windyInstance.map) return
           if (enabled) {
-            if (!satelliteLayer) {
-              const satellitePane = windyInstance.map.createPane('satellitePane')
-              satellitePane.style.zIndex = '250'
-              satellitePane.style.pointerEvents = 'none'
-              // NASA GIBS WMTS is free and needs no API key. MODIS Terra true-colour
-              // imagery reveals the broad swirling cloud bands of tropical systems.
-              const imageryDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-              satelliteLayer = L.tileLayer(
-                `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${imageryDate}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`,
+            if (!rainFieldLayer) {
+              const rainPane = windyInstance.map.getPane('rainFieldPane') || windyInstance.map.createPane('rainFieldPane')
+              rainPane.style.zIndex = '240'
+              rainPane.style.pointerEvents = 'none'
+              // IMERG daily imagery trails real time by about one to two days.
+              const rainDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+              rainFieldLayer = L.tileLayer(
+                `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/IMERG_Precipitation_Rate/default/${rainDate}/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png`,
                 {
-                  attribution: 'Imagery &copy; NASA EOSDIS GIBS',
-                  maxNativeZoom: 9,
+                  attribution: 'Rain rate &copy; NASA EOSDIS GIBS (IMERG)',
+                  maxNativeZoom: 6,
                   maxZoom: 18,
                   tileSize: 256,
-                  opacity: 0.78,
-                  pane: 'satellitePane',
-                }
+                  opacity: 0.82,
+                  pane: 'rainFieldPane',
+                },
               )
             }
-            if (!windyInstance.map.hasLayer(satelliteLayer)) {
-              satelliteLayer.addTo(windyInstance.map)
+            if (!windyInstance.map.hasLayer(rainFieldLayer)) {
+              rainFieldLayer.addTo(windyInstance.map)
             }
-            satelliteLayer.bringToFront()
-            updateIndicator('<span>🛰️ NASA GIBS cloud imagery active</span>', '#38bdf8')
-          } else {
-            if (satelliteLayer && windyInstance.map.hasLayer(satelliteLayer)) {
-              windyInstance.map.removeLayer(satelliteLayer)
-            }
-            updateIndicator('<span>💨 Wind Streamlines Active</span>', 'rgba(255, 255, 255, 0.2)')
-          }
-        }
-
-        function setRadar(enabled, tileUrl) {
-          if (!windyInstance || !windyInstance.map) return
-          // RainViewer Universal Blue radar scheme (2) for standard weather map blue precipitation
-          const url = tileUrl || 'https://tilecache.rainviewer.com/v2/radar/nowcast_latest/256/{z}/{x}/{y}/2/1_1.png'
-          if (enabled) {
-            if (!radarLayer) {
-              radarLayer = L.tileLayer(url, {
-                opacity: 0.82,
-                zIndex: 400,
-                attribution: 'Rain Radar &copy; RainViewer',
-              })
-            }
-            if (!windyInstance.map.hasLayer(radarLayer)) {
-              radarLayer.addTo(windyInstance.map)
-            }
-          } else {
-            if (radarLayer && windyInstance.map.hasLayer(radarLayer)) {
-              windyInstance.map.removeLayer(radarLayer)
-            }
+          } else if (rainFieldLayer && windyInstance.map.hasLayer(rainFieldLayer)) {
+            windyInstance.map.removeLayer(rainFieldLayer)
           }
         }
 
@@ -364,32 +338,34 @@
               console.log('[Windy] Changing overlay to:', target)
 
               if (target === 'wind') {
-                // Disable pure-rain mode and restore wind canvas
                 if (windyEl) windyEl.classList.remove('pure-rain-mode')
-                setRadar(false)
+                setRainField(false)
                 windyInstance.store.set('overlay', 'wind')
+                windyInstance.store.set('particlesAnim', 'on')
                 updateIndicator('<span>💨 Wind Particles Active (Velocity Streamlines)</span>', '#38bdf8')
               } else if (target === 'temp') {
                 // Temperature heat map
                 if (windyEl) windyEl.classList.remove('pure-rain-mode')
-                setRadar(false)
+                setRainField(false)
                 windyInstance.store.set('overlay', 'temp')
+                windyInstance.store.set('particlesAnim', 'off')
                 updateIndicator('<span>🌡️ Heat Map Active (Cool → Warm → Hot)</span>', '#f97316')
               } else if (target === 'rain') {
-                // Pure rain mode: hide wind animation canvas completely
-                if (windyEl) windyEl.classList.add('pure-rain-mode')
-                // Turn on standard blue precipitation radar
-                setRadar(true, data.radarTileUrl)
-                updateIndicator('<span>🌧️ Pure Rain Radar (Standard Blue):</span> <span class="rain-legend-bar"></span> <span>Light → Heavy</span>', '#0284c7')
-              } else if (target === 'clouds') {
+                // This API key only exposes wind/temp/pressure, so rain is a
+                // separate NASA IMERG colour field.
                 if (windyEl) windyEl.classList.remove('pure-rain-mode')
-                setRadar(false)
-                windyInstance.store.set('overlay', 'clouds')
-                updateIndicator('<span>☁️ Cloud Cover Active</span>', '#94a3b8')
+                setRainField(true)
+                windyInstance.store.set('particlesAnim', 'off')
+                updateIndicator('<span>🌧️ Rain field:</span> <span class="rain-legend-bar"></span> <span>Light → Heavy</span>', '#0284c7')
               } else {
                 if (windyEl) windyEl.classList.remove('pure-rain-mode')
-                setRadar(false)
-                windyInstance.store.set('overlay', target)
+                setRainField(false)
+                const allowed = typeof windyInstance.store.getAllowed === 'function'
+                  ? windyInstance.store.getAllowed('overlay')
+                  : ['wind', 'temp', 'pressure']
+                if (Array.isArray(allowed) && allowed.includes(target)) {
+                  windyInstance.store.set('overlay', target)
+                }
                 updateIndicator(`<span>🌐 ${target.toUpperCase()} Layer</span>`, '#38bdf8')
               }
 
@@ -397,10 +373,6 @@
             } catch (err) {
               console.error('Windy overlay change error:', err)
             }
-          } else if (data.type === 'toggle-satellite') {
-            setSatellite(Boolean(data.enabled))
-          } else if (data.type === 'toggle-radar') {
-            setRadar(Boolean(data.enabled), data.tileUrl)
           } else if (data.type === 'update-cyclones') {
             renderCyclones(data.storms || [], data.enabled !== false)
           } else if (data.type === 'focus-cyclone') {
