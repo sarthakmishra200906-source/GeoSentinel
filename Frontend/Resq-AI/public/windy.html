@@ -200,7 +200,7 @@
                   maxNativeZoom: 6,
                   maxZoom: 18,
                   tileSize: 256,
-                  opacity: 0.82,
+                  opacity: 0.92,
                   pane: 'rainFieldPane',
                 },
               )
@@ -352,8 +352,10 @@
                 updateIndicator('<span>🌡️ Heat Map Active (Cool → Warm → Hot)</span>', '#f97316')
               } else if (target === 'rain') {
                 // This API key only exposes wind/temp/pressure, so rain is a
-                // separate NASA IMERG colour field.
-                if (windyEl) windyEl.classList.remove('pure-rain-mode')
+                // separate NASA IMERG colour field. Hide Windy's own canvas,
+                // otherwise the active wind/heat colour ramp shows through the
+                // rain tiles and the two layers look merged.
+                if (windyEl) windyEl.classList.add('pure-rain-mode')
                 setRainField(true)
                 windyInstance.store.set('particlesAnim', 'off')
                 updateIndicator('<span>🌧️ Rain field:</span> <span class="rain-legend-bar"></span> <span>Light → Heavy</span>', '#0284c7')
