@@ -110,10 +110,10 @@
       }
       .rain-legend-bar {
         display: inline-block;
-        width: 70px;
-        height: 7px;
+        width: 96px;
+        height: 8px;
         border-radius: 3px;
-        background: linear-gradient(to right, #bae6fd, #38bdf8, #0284c7, #1d4ed8, #312e81);
+        background: linear-gradient(to right, #0c2f4a, #0e7490, #10b981, #eab308, #f97316, #dc2626, #7e22ce);
       }
     </style>
     <script src="https://unpkg.com/leaflet@1.4.0/dist/leaflet.js"></script>
@@ -132,7 +132,11 @@
       } else {
         const pendingMessages = []
         let windyInstance = null
-        let rainFieldLayer = null
+        let rainHeatOverlay = null
+        let rainHeatActive = false
+        let rainHeatToken = 0
+        let rainHeatTimer = null
+        let rainHeatBoundsKey = ''
         let cycloneLayerGroup = null
         let cycloneMarkersMap = new Map()
 
@@ -179,38 +183,201 @@
           if (!cycloneLayerGroup) {
             cycloneLayerGroup = L.layerGroup().addTo(map)
           }
+          const rainPane = map.getPane('rainFieldPane') || map.createPane('rainFieldPane')
+          rainPane.style.zIndex = '240'
+          rainPane.style.pointerEvents = 'none'
+          // Rebuild the rainfall heat field for the newly visible area.
+          map.on('moveend zoomend', () => scheduleRainField())
         }
 
-        // The Windy API key used by this deployment only unlocks wind, temp and
-        // pressure overlays, so the rain layer is drawn from NASA GIBS IMERG as
-        // a continuous colour-ramped precipitation-rate field.
-        function setRainField(enabled) {
-          if (!windyInstance || !windyInstance.map) return
-          if (enabled) {
-            if (!rainFieldLayer) {
-              const rainPane = windyInstance.map.getPane('rainFieldPane') || windyInstance.map.createPane('rainFieldPane')
-              rainPane.style.zIndex = '240'
-              rainPane.style.pointerEvents = 'none'
-              // IMERG daily imagery trails real time by about one to two days.
-              const rainDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-              rainFieldLayer = L.tileLayer(
-                `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/IMERG_Precipitation_Rate/default/${rainDate}/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png`,
-                {
-                  attribution: 'Rain rate &copy; NASA EOSDIS GIBS (IMERG)',
-                  maxNativeZoom: 6,
-                  maxZoom: 18,
-                  tileSize: 256,
-                  opacity: 0.92,
-                  pane: 'rainFieldPane',
-                },
-              )
+        // The Windy API key only unlocks wind/temp/pressure, so rain is drawn
+        // as a real Open-Meteo precipitation heat field that colours the WHOLE
+        // map, in the same continuous-colour style as the temperature overlay.
+        // Unlike raw satellite tiles this never leaves dry areas blank/grey.
+        const RAIN_STOPS = [
+          [0, [12, 47, 74]],       // dry
+          [0.8, [14, 116, 144]],   // trace
+          [3, [16, 185, 129]],     // light
+          [10, [234, 179, 8]],     // moderate
+          [30, [249, 115, 22]],    // heavy
+          [70, [220, 38, 38]],     // very heavy
+          [150, [126, 34, 206]],   // extreme
+        ]
+
+        function rainColor(mm) {
+          if (!Number.isFinite(mm) || mm <= 0) return RAIN_STOPS[0][1]
+          for (let i = 1; i < RAIN_STOPS.length; i += 1) {
+            const [hiMm, hiColor] = RAIN_STOPS[i]
+            if (mm <= hiMm) {
+              const [loMm, loColor] = RAIN_STOPS[i - 1]
+              const t = (mm - loMm) / (hiMm - loMm)
+              return [
+                Math.round(loColor[0] + (hiColor[0] - loColor[0]) * t),
+                Math.round(loColor[1] + (hiColor[1] - loColor[1]) * t),
+                Math.round(loColor[2] + (hiColor[2] - loColor[2]) * t),
+              ]
             }
-            if (!windyInstance.map.hasLayer(rainFieldLayer)) {
-              rainFieldLayer.addTo(windyInstance.map)
-            }
-          } else if (rainFieldLayer && windyInstance.map.hasLayer(rainFieldLayer)) {
-            windyInstance.map.removeLayer(rainFieldLayer)
           }
+          return RAIN_STOPS[RAIN_STOPS.length - 1][1]
+        }
+
+        function mercY(latDeg) {
+          const lat = Math.max(-85, Math.min(85, latDeg)) * Math.PI / 180
+          return Math.log(Math.tan(Math.PI / 4 + lat / 2))
+        }
+
+        function scheduleRainField() {
+          if (!rainHeatActive || !windyInstance || !windyInstance.map) return
+          clearTimeout(rainHeatTimer)
+          rainHeatTimer = setTimeout(() => buildRainField(), 350)
+        }
+
+        function renderRainField(samples, south, north, west, east) {
+          const fw = 160
+          const fh = 120
+          const canvas = document.createElement('canvas')
+          canvas.width = fw
+          canvas.height = fh
+          const ctx = canvas.getContext('2d')
+          const img = ctx.createImageData(fw, fh)
+          const spanLon = Math.max(1e-6, east - west)
+          const northY = mercY(north)
+          const spanY = Math.max(1e-6, northY - mercY(south))
+          const points = samples.map((s) => ({
+            x: (s.lon - west) / spanLon,
+            y: (northY - mercY(s.lat)) / spanY,
+            mm: s.mm,
+          }))
+
+          for (let y = 0; y < fh; y += 1) {
+            const py = (y + 0.5) / fh
+            for (let x = 0; x < fw; x += 1) {
+              const px = (x + 0.5) / fw
+              let weightSum = 0
+              let valueSum = 0
+              for (let i = 0; i < points.length; i += 1) {
+                const p = points[i]
+                const dx = p.x - px
+                const dy = p.y - py
+                const weight = 1 / (dx * dx + dy * dy + 0.0006)
+                weightSum += weight
+                valueSum += weight * p.mm
+              }
+              const mm = weightSum > 0 ? valueSum / weightSum : 0
+              const [r, g, b] = rainColor(mm)
+              const idx = (y * fw + x) * 4
+              img.data[idx] = r
+              img.data[idx + 1] = g
+              img.data[idx + 2] = b
+              img.data[idx + 3] = 255
+            }
+          }
+          ctx.putImageData(img, 0, 0)
+
+          // Upscale with smoothing so the coarse field reads as one continuous
+          // colour ramp, matching the appearance of the temperature heat map.
+          const out = document.createElement('canvas')
+          out.width = 640
+          out.height = 480
+          const octx = out.getContext('2d')
+          octx.imageSmoothingEnabled = true
+          octx.imageSmoothingQuality = 'high'
+          octx.drawImage(canvas, 0, 0, out.width, out.height)
+          return out.toDataURL('image/png')
+        }
+
+        async function buildRainField() {
+          const map = windyInstance?.map
+          if (!map || !rainHeatActive) return
+
+          const raw = map.getBounds()
+          const padLat = (raw.getNorth() - raw.getSouth()) * 0.18
+          const padLon = (raw.getEast() - raw.getWest()) * 0.18
+          const south = Math.max(-85, raw.getSouth() - padLat)
+          const north = Math.min(85, raw.getNorth() + padLat)
+          const west = raw.getWest() - padLon
+          const east = raw.getEast() + padLon
+          const bounds = L.latLngBounds([south, west], [north, east])
+
+          const key = [south, north, west, east].map((v) => v.toFixed(2)).join(':')
+          if (key === rainHeatBoundsKey && rainHeatOverlay) return
+
+          const token = ++rainHeatToken
+          const cols = 16
+          const rows = 12
+          const lats = []
+          const lons = []
+          for (let r = 0; r < rows; r += 1) {
+            const lat = south + (north - south) * (r + 0.5) / rows
+            for (let c = 0; c < cols; c += 1) {
+              lats.push(+lat.toFixed(3))
+              lons.push(+(west + (east - west) * (c + 0.5) / cols).toFixed(3))
+            }
+          }
+
+          updateIndicator('<span>🌧️ Rain field: loading real rainfall data…</span>', '#0284c7')
+
+          try {
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lats.join(',')}&longitude=${lons.join(',')}&hourly=precipitation&past_days=7&forecast_days=1&timezone=UTC`
+            const response = await fetch(url)
+            if (!response.ok) throw new Error(`Rainfall data HTTP ${response.status}`)
+            const payload = await response.json()
+            if (token !== rainHeatToken || !rainHeatActive) return
+
+            const list = Array.isArray(payload) ? payload : [payload]
+            const samples = list.map((item, index) => {
+              const values = item?.hourly?.precipitation || []
+              const mm = values.reduce((sum, v) => sum + (Number(v) || 0), 0)
+              return {
+                lat: Number(item?.latitude ?? lats[index]),
+                lon: Number(item?.longitude ?? lons[index]),
+                mm,
+              }
+            }).filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lon))
+            if (!samples.length) throw new Error('No rainfall samples returned')
+
+            const dataUrl = renderRainField(samples, south, north, west, east)
+            if (token !== rainHeatToken || !rainHeatActive) return
+
+            if (rainHeatOverlay) map.removeLayer(rainHeatOverlay)
+            rainHeatOverlay = L.imageOverlay(dataUrl, bounds, {
+              pane: 'rainFieldPane',
+              opacity: 1,
+              interactive: false,
+            }).addTo(map)
+            rainHeatBoundsKey = key
+
+            const peak = Math.max(...samples.map((s) => s.mm))
+            updateIndicator(
+              `<span>🌧️ Rainfall (7 days):</span> <span class="rain-legend-bar"></span> <span>Dry → Light → Heavy · peak ${peak.toFixed(0)} mm</span>`,
+              '#0284c7',
+            )
+          } catch (err) {
+            if (token !== rainHeatToken) return
+            console.warn('[Rain] Could not build rainfall heat field:', err)
+            if (rainHeatOverlay) {
+              map.removeLayer(rainHeatOverlay)
+              rainHeatOverlay = null
+            }
+            updateIndicator('<span>🌧️ Rain field unavailable — check connection</span>', '#b91c1c')
+          }
+        }
+
+        function setRainField(enabled) {
+          rainHeatActive = enabled
+          rainHeatToken += 1
+          clearTimeout(rainHeatTimer)
+          const map = windyInstance?.map
+          if (!map) return
+          if (!enabled) {
+            if (rainHeatOverlay) {
+              map.removeLayer(rainHeatOverlay)
+              rainHeatOverlay = null
+            }
+            rainHeatBoundsKey = ''
+            return
+          }
+          buildRainField()
         }
 
         function renderCyclones(storms, enabled) {
@@ -351,14 +518,11 @@
                 windyInstance.store.set('particlesAnim', 'off')
                 updateIndicator('<span>🌡️ Heat Map Active (Cool → Warm → Hot)</span>', '#f97316')
               } else if (target === 'rain') {
-                // This API key only exposes wind/temp/pressure, so rain is a
-                // separate NASA IMERG colour field. Hide Windy's own canvas,
-                // otherwise the active wind/heat colour ramp shows through the
-                // rain tiles and the two layers look merged.
+                // Real 7-day rainfall heat field covering the whole map. Hide
+                // Windy's own canvas so its wind/heat ramp cannot bleed through.
                 if (windyEl) windyEl.classList.add('pure-rain-mode')
                 setRainField(true)
                 windyInstance.store.set('particlesAnim', 'off')
-                updateIndicator('<span>🌧️ Rain field:</span> <span class="rain-legend-bar"></span> <span>Light → Heavy</span>', '#0284c7')
               } else {
                 if (windyEl) windyEl.classList.remove('pure-rain-mode')
                 setRainField(false)
