@@ -1,6 +1,10 @@
 import 'dotenv/config'
 
 const DEFAULT_TIMEOUT_MS = 8000
+// A single chat answer must not walk through a long list of slow/overloaded
+// remote models. This is the total budget for all remote attempts; whatever
+// remains goes to the local Ollama fallback.
+const DEFAULT_REMOTE_DEADLINE_MS = 12000
 const MAX_CONTEXT_CHARS = 16000
 const MAX_OUTPUT_TOKENS = 1200
 // llama3.1:8b gives materially better grounded answers than the 3B model on
@@ -142,20 +146,17 @@ export async function generateGroundedAnswer({ question, matches, language = 'en
   if (providerUrl) providers.push({ type: 'openai-compatible', url: providerUrl })
   if (googleKey) {
     const candidateModels = [
-      // Only model IDs that the current Gemini API exposes. Trying retired
-      // IDs wasted the 8 s budget on guaranteed 404s before the local fallback.
+      // Fast, currently available IDs first. The 2.5/pro IDs return 404 on
+      // this API and "gemini-flash-latest" can hang, so they are not tried.
+      // Heavier flash IDs stay as late options behind the total deadline.
       process.env.GOOGLE_GEMINI_MODEL,
-      'gemini-3.1-flash-lite',
       'gemini-3.5-flash-lite',
-      'gemini-3.5-flash',
+      'gemini-3.1-flash-lite',
+      'gemini-flash-lite-latest',
       'gemini-3.6-flash',
+      'gemini-3.5-flash',
       'gemini-3.7-flash',
       'gemini-3.8-flash',
-      'gemini-flash-lite-latest',
-      'gemini-flash-latest',
-      'gemini-2.5-flash-lite',
-      'gemini-2.5-flash',
-      'gemini-pro-latest',
     ]
       .filter(Boolean)
       .filter((model, index, models) => models.indexOf(model) === index)
@@ -206,9 +207,23 @@ export async function generateGroundedAnswer({ question, matches, language = 'en
     warning: 'Language-model providers returned no answer.',
     diagnostics: { provider: 'unknown', reason: 'No provider responded.' },
   }
+  const remoteDeadline = Date.now() + (Number(process.env.LLM_TOTAL_TIMEOUT_MS) || DEFAULT_REMOTE_DEADLINE_MS)
   for (const provider of providers) {
+    const remainingMs = remoteDeadline - Date.now()
+    if (remainingMs <= 0) {
+      lastFailure = {
+        status: 'PROVIDER_TIMEOUT',
+        answer: null,
+        warning: 'Language-model providers exceeded the total response budget; local fallback was attempted.',
+        diagnostics: { provider: provider.type, reason: 'Total remote deadline reached.' },
+      }
+      break
+    }
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), Number(process.env.LLM_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS)
+    const timeout = setTimeout(
+      () => controller.abort(),
+      Math.min(Number(process.env.LLM_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS, remainingMs),
+    )
     try {
       const body = provider.type === 'openai-compatible'
         ? {

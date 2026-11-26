@@ -730,20 +730,18 @@ Provider selection:
 
   ```javascript
   [
-    'gemini-3.1-flash-lite',
-    'gemini-3.6-flash',
-    'gemini-3.8-flash',
-    'gemini-3.7-flash',
-    'gemini-3.5-flash',
     process.env.GOOGLE_GEMINI_MODEL,
-    'gemini-2.5-flash',
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
-    'gemini-1.5-pro',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-3.7-flash',
+    'gemini-3.8-flash',
   ]
   ```
 
-  The list is deduplicated and tried in order on non-2xx/empty responses or timeouts. Each attempt uses `LLM_TIMEOUT_MS` (default `8000` ms). Current stable aliases are tried first because older IDs (`gemini-1.5-*`, `gemini-2.5-flash`) are being retired by the provider.
+  The list is deduplicated and tried in order on non-2xx/empty responses or timeouts. Each attempt uses `LLM_TIMEOUT_MS` (default `8000` ms), and the whole remote chain is capped by `LLM_TOTAL_TIMEOUT_MS` (default `12000` ms) before the local fallback runs. Fast, currently available IDs are tried first; retired IDs (`gemini-1.5-*`, `gemini-2.5-*`, `gemini-pro-latest`) and the hanging `gemini-flash-latest` alias are not attempted.
 
 - **Local Ollama fallback:** after every remote provider fails, **or when no remote provider is configured at all**, `groundedChat.js` calls `POST {OLLAMA_BASE_URL}/api/generate` with the *same approved-context prompt*. Set `OLLAMA_FALLBACK_ENABLED=true` (default), `OLLAMA_BASE_URL=http://127.0.0.1:11434`, `OLLAMA_MODEL=llama3.1:8b` (default) and `OLLAMA_TIMEOUT_MS` (default `60000`). The request uses `temperature: 0`, `seed: 42`, `num_ctx: 8192`, `num_predict: 1200`, and `keep_alive: 10m` so answers stay deterministic and repeat calls do not reload the model. A successful local answer is returned with `provider: "ollama"` and `model: <installed model>`. If the model refuses with `NO_SUPPORT`, the controller applies the same safe fallback as for Gemini. If Ollama is not installed or has no matching model, the existing `SAFE_FALLBACK` path still applies. **No chat model is trained locally** — Ollama runs a downloaded pretrained model.
 
@@ -985,7 +983,7 @@ Set these in the **backend** environment (for local development, `Backend/server
 | `GOOGLE_GEMINI_MODEL` | Express chat | Optional Gemini model to try after current stable aliases |
 | `LLM_API_URL` | Express chat | Optional OpenAI-compatible endpoint; when set, tried before Gemini |
 | `LLM_API_KEY` | Express chat | Bearer key for `LLM_API_URL`; also legacy Gemini key only when `LLM_API_URL` is empty |
-| `LLM_MODEL`, `LLM_TIMEOUT_MS`, `LLM_MAX_TOKENS` | Express chat | OpenAI-compatible model, timeout (default `8000`), output cap (default/hard max `1200`) |
+| `LLM_MODEL`, `LLM_TIMEOUT_MS`, `LLM_TOTAL_TIMEOUT_MS`, `LLM_MAX_TOKENS` | Express chat | OpenAI-compatible model, per-attempt timeout (default `8000`), total remote budget (default `12000`), output cap (default/hard max `1200`) |
 | `OLLAMA_FALLBACK_ENABLED` | Express chat | Enables the local fallback; default `true` |
 | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | Express chat + simulation brief | Local Ollama endpoint and model; defaults `http://127.0.0.1:11434`, `llama3.1:8b` |
 | `OLLAMA_TIMEOUT_MS` | Express chat | Chat fallback timeout in ms; default `60000`. The simulation brief service separately defaults to `120000` ms. |
