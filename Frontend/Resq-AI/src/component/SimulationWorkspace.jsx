@@ -18,9 +18,12 @@ const DEFAULT_SCENARIO = {
   durationHours: 24,
   institutions: 500,
   shelters: 20,
+  weatherSteering: [],
+  useWeatherSteering: false,
+  weatherSource: '',
 }
 
-function scenarioFromParameters(name, parameters = {}) {
+function scenarioFromParameters(name, parameters = {}, runDataSource = '') {
   const cyclone = parameters.cyclone || {}
   const rainfall = parameters.rainfall || {}
   const capacity = parameters.capacity || {}
@@ -37,6 +40,9 @@ function scenarioFromParameters(name, parameters = {}) {
     durationHours: cyclone.durationHours ?? rainfall.durationHours ?? DEFAULT_SCENARIO.durationHours,
     institutions: capacity.institutions ?? DEFAULT_SCENARIO.institutions,
     shelters: capacity.shelters ?? DEFAULT_SCENARIO.shelters,
+    weatherSteering: cyclone.weatherSteering || [],
+    useWeatherSteering: Boolean(cyclone.weatherSteering?.length),
+    weatherSource: runDataSource || '',
     legacyRoutePoints: cyclone.routePoints || [],
   }
 }
@@ -112,6 +118,8 @@ export default function SimulationWorkspace({ token }) {
   const [runCursor, setRunCursor] = useState(null)
   const [hasMoreRuns, setHasMoreRuns] = useState(false)
   const [steps, setSteps] = useState([])
+  const [expectedTrack, setExpectedTrack] = useState(null)
+  const [previewError, setPreviewError] = useState('')
   const [storedReports, setStoredReports] = useState([])
   const [timelineIndex, setTimelineIndex] = useState(-1)
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState('')
@@ -146,7 +154,7 @@ export default function SimulationWorkspace({ token }) {
         throw new Error(data.error || 'Unable to load simulation run')
       }
       setRun(data.run)
-      setScenario(scenarioFromParameters(data.run.scenario?.name, data.run.scenario?.parameters))
+      setScenario(scenarioFromParameters(data.run.scenario?.name, data.run.scenario?.parameters, data.run.scenario?.dataSource))
       setSteps(data.timesteps || [])
       setTimelineIndex(data.timesteps?.length ? data.timesteps.length - 1 : -1)
       setPdfPreviewUrl('')
@@ -178,22 +186,79 @@ export default function SimulationWorkspace({ token }) {
       const query = new URLSearchParams({
         latitude: String(scenario.startLatitude),
         longitude: String(scenario.startLongitude),
+        hours: String(scenario.durationHours || 24),
       })
       const response = await fetch(`${API_URL}/simulation/steering-wind?${query}`, { headers })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to fetch steering wind')
+      const steering = (data.steering || []).map(({ hour, headingDeg, forwardSpeedKmh }) => ({
+        hour,
+        headingDeg,
+        forwardSpeedKmh,
+      }))
       setScenario((current) => ({
         ...current,
         headingDeg: data.headingDeg,
         forwardSpeedKmh: data.forwardSpeedKmh,
+        weatherSteering: steering,
+        useWeatherSteering: steering.length > 0,
+        weatherSource: `${data.provider} ${data.level} · ${steering.length} hourly steering values`,
       }))
-      setMessage(`Steering wind from Open-Meteo ${data.level}: heading ${data.headingDeg}°, forward speed ${data.forwardSpeedKmh} km/h.`)
+      setMessage(steering.length
+        ? `Weather steering loaded from ${data.provider} ${data.level}: ${steering.length} hourly values. The expected path will follow live weather hour by hour.`
+        : `Steering wind from ${data.provider} ${data.level}: heading ${data.headingDeg}°, forward speed ${data.forwardSpeedKmh} km/h.`)
     } catch (error) {
       setMessage(error.message)
     } finally {
       setBusy(false)
     }
   }
+
+  // The expected path is recomputed whenever the weather scenario changes.
+  const scenarioParameters = useMemo(() => ({
+    mode: 'forward_forecast',
+    cyclone: {
+      startLatitude: Number(scenario.startLatitude),
+      startLongitude: Number(scenario.startLongitude),
+      headingDeg: scenario.headingDeg === 'auto' ? 'auto' : Number(scenario.headingDeg),
+      forwardSpeedKmh: Number(scenario.forwardSpeedKmh),
+      windSpeedKmh: Number(scenario.windSpeedKmh),
+      centralPressureHpa: Number(scenario.centralPressureHpa),
+      galeRadiusKm: Number(scenario.galeRadiusKm),
+      durationHours: Number(scenario.durationHours),
+      weatherSteering: scenario.useWeatherSteering ? scenario.weatherSteering : [],
+    },
+    rainfall: { hourlyMm: Number(scenario.hourlyMm), durationHours: Number(scenario.durationHours) },
+    capacity: { districts: 30, institutions: Number(scenario.institutions), shelters: Number(scenario.shelters) },
+  }), [scenario])
+
+  React.useEffect(() => {
+    let active = true
+    const controller = new AbortController()
+    const loadPreview = async () => {
+      try {
+        const response = await fetch(`${API_URL}/simulation/preview`, {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ parameters: scenarioParameters }),
+          signal: controller.signal,
+        })
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.error || 'Unable to build expected track')
+        if (active) {
+          setExpectedTrack(data)
+          setPreviewError('')
+        }
+      } catch (error) {
+        if (active && error.name !== 'AbortError') setPreviewError(error.message)
+      }
+    }
+    loadPreview()
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [headers, scenarioParameters])
 
   React.useEffect(() => {
     let active = true
@@ -257,6 +322,7 @@ export default function SimulationWorkspace({ token }) {
               centralPressureHpa: Number(scenario.centralPressureHpa),
               galeRadiusKm: Number(scenario.galeRadiusKm),
               durationHours: Number(scenario.durationHours),
+              weatherSteering: scenario.useWeatherSteering ? scenario.weatherSteering : [],
             },
             rainfall: { hourlyMm: Number(scenario.hourlyMm), durationHours: Number(scenario.durationHours) },
             capacity: { districts: 30, institutions: Number(scenario.institutions), shelters: Number(scenario.shelters) },
@@ -390,9 +456,13 @@ export default function SimulationWorkspace({ token }) {
     return [{ center, position: [latitude, longitude] }]
   }), [rescueCenterLayer.centers])
   const unmappedCenterCount = rescueCenterLayer.centers.length - rescueCenterMarkers.length
+  const expectedPositions = [startPosition, ...(expectedTrack?.positions || []).map((point) => [point.latitude, point.longitude])]
+  const drawnExpectedSegments = splitRouteAtDateLine(expectedPositions)
+  const expectedMilestones = (expectedTrack?.positions || []).filter((point) => [6, 12, 24, 48].includes(point.hour))
   const mapBoundsPositions = useMemo(
-    () => [...routePositions, ...rescueCenterMarkers.map((marker) => marker.position)],
-    [routePositions, rescueCenterMarkers],
+    () => [...routePositions, ...expectedPositions, ...rescueCenterMarkers.map((marker) => marker.position)],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [routePositions, expectedTrack, rescueCenterMarkers],
   )
   const routeStart = routePositions[0]
   const cyclonePath = routePositions
@@ -625,37 +695,58 @@ export default function SimulationWorkspace({ token }) {
         <div className="simulation-start-fields">
           <label>Latitude<input aria-label="Starting eye latitude" type="number" min="-90" max="90" step="0.0001" value={scenario.startLatitude} disabled={Boolean(run) || busy} onChange={(event) => setScenario({ ...scenario, startLatitude: event.target.value })} /></label>
           <label>Longitude<input aria-label="Starting eye longitude" type="number" min="-180" max="180" step="0.0001" value={scenario.startLongitude} disabled={Boolean(run) || busy} onChange={(event) => setScenario({ ...scenario, startLongitude: event.target.value })} /></label>
-          <button type="button" onClick={autoSteer} disabled={Boolean(run) || busy}>Auto-fetch steering wind</button>
+          <button type="button" onClick={autoSteer} disabled={Boolean(run) || busy}>Auto-fetch weather steering</button>
         </div>
-        <p>The eye advances hourly with a small beta-drift correction, weakens after landfall, and gains a cone of uncertainty (~25 km at +6h, 45 km at +12h, 75 km at +24h). A highlighted +12h impact card appears once hour 12 is generated.</p>
+        <div className="simulation-weather-toggle">
+          <label>
+            <input
+              type="checkbox"
+              checked={scenario.useWeatherSteering}
+              disabled={Boolean(run) || busy || !scenario.weatherSteering.length}
+              onChange={(event) => setScenario((current) => ({ ...current, useWeatherSteering: event.target.checked }))}
+            />
+            Follow hourly weather steering
+          </label>
+          <span>{scenario.weatherSource || 'No live steering loaded yet — the path uses the configured heading and speed.'}</span>
+        </div>
+        <p>The eye advances hourly with a small beta-drift correction, weakens after landfall, and gains a cone of uncertainty (~25 km at +6h, 45 km at +12h, 75 km at +24h). A highlighted +12h impact card appears once hour 12 is generated. Change the weather inputs or fetch new steering to see the expected path update before creating the test run.</p>
       </div>
       {run && <p className="simulation-run-meta">Run {run._id} · {run.status} · synthetic hour {run.sequence}</p>}
       {steps.length > 0 && (
         <div className="simulation-timeline">
           <div className="simulation-timeline-header">
             <strong>Replay timeline</strong>
-            <span>Viewing synthetic hour {timelineIndex + 1}; moving backward only changes the display.</span>
+            <span>Viewing +{timelineIndex + 1}h of {steps.length} · slide to move back and forth through the cyclone path.</span>
           </div>
           <input
+            className="simulation-timeline-slider"
             type="range"
             min="0"
             max={steps.length - 1}
+            step="1"
             value={Math.max(0, timelineIndex)}
             onChange={(event) => setTimelineIndex(Number(event.target.value))}
             aria-label="Simulation timeline"
+            aria-valuetext={`+${timelineIndex + 1} hours`}
           />
+          <div className="simulation-timeline-ticks" aria-hidden="true">
+            <span>+1h</span><span>+{Math.max(1, Math.ceil(steps.length / 2))}h</span><span>+{steps.length}h</span>
+          </div>
           <div className="simulation-timeline-actions">
-            <button type="button" onClick={() => setTimelineIndex((index) => Math.max(0, index - 1))}>← Previous hour</button>
-            <button type="button" onClick={() => setTimelineIndex((index) => Math.min(steps.length - 1, index + 1))}>Next hour →</button>
+            <button type="button" onClick={() => setTimelineIndex((index) => Math.max(0, index - 1))} disabled={timelineIndex <= 0}>← Previous hour</button>
+            <button type="button" onClick={() => setTimelineIndex((index) => Math.min(steps.length - 1, index + 1))} disabled={timelineIndex >= steps.length - 1}>Next hour →</button>
           </div>
         </div>
       )}
       <div className="simulation-map-panel">
         <div className="simulation-map-heading">
           <strong>Forward track, cone of uncertainty and rescue centers</strong>
-          <span>{selectedStep ? `+${selectedStep.cyclone.leadHours || selectedStep.sequence}h · ${selectedStep.impacts.riskTier}` : 'Advance the run to draw the projected track'}</span>
+          <span>{selectedStep ? `+${selectedStep.cyclone.leadHours || selectedStep.sequence}h · ${selectedStep.impacts.riskTier}` : expectedTrack ? `Expected path ready · ${expectedTrack.durationHours}h` : 'Building expected path…'}</span>
         </div>
         <p>
+          {previewError && ` Expected path preview unavailable: ${previewError}.`}
+          {expectedTrack && ` Expected ${expectedTrack.durationHours}h path uses ${expectedTrack.steeringSource === 'open_meteo_hourly' ? 'hourly Open-Meteo weather steering' : 'the configured heading and speed'} with an IMD-style recurving arc: amber dashed line with +6/+12/+24/+48h markers. `}
+          {expectedTrack?.landfall && ` Projected first landfall near +${expectedTrack.landfall.hour}h at ${Math.abs(expectedTrack.landfall.latitude).toFixed(2)}°${expectedTrack.landfall.latitude >= 0 ? 'N' : 'S'}, ${Math.abs(expectedTrack.landfall.longitude).toFixed(2)}°${expectedTrack.landfall.longitude >= 0 ? 'E' : 'W'}. `}
           Click the map to place the starting eye while configuring. The shaded band is the IMD-style cone of uncertainty;
           the inner rings are 34/50/64 kt wind radii. Rescue centers are reference-only and are not changed by this run.
           {rescueCenterLayer.status === 'loading' && ' Loading rescue centers…'}
@@ -668,8 +759,14 @@ export default function SimulationWorkspace({ token }) {
           <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           <FitRouteBounds positions={mapBoundsPositions} />
           <StartPointMapClick enabled={!run && !busy} onPick={(point) => setScenario((current) => ({ ...current, startLatitude: point.latitude, startLongitude: point.longitude }))} />
+          {drawnExpectedSegments.map((segment, index) => <Polyline key={`expected-track-${index}`} positions={segment} pathOptions={{ color: '#f59e0b', dashArray: '4 6', weight: 3 }} />)}
           {drawnRouteSegments.map((segment, index) => <Polyline key={`planned-route-${index}`} positions={segment} pathOptions={{ color: '#94a3b8', dashArray: '8 8', weight: 2 }} />)}
           {steps.length > 0 && drawnCycloneSegments.map((segment, index) => <Polyline key={`actual-track-${index}`} positions={segment} pathOptions={{ color: '#dc2626', weight: 5 }} />)}
+          {expectedMilestones.map((point) => (
+            <CircleMarker key={`expected-milestone-${point.hour}`} center={[point.latitude, point.longitude]} radius={5} pathOptions={{ color: '#b45309', fillColor: '#fbbf24', fillOpacity: 0.9 }}>
+              <Popup>Expected +{point.hour}h · {point.windSpeedKmh} km/h · {point.riskTier}{point.isLandfall ? ' · after landfall' : ''}</Popup>
+            </CircleMarker>
+          ))}
           {selectedStep && Number(selectedStep.cyclone.coneRadiusKm) > 0 && (
             <Circle
               center={cyclonePosition}

@@ -51,6 +51,7 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
   const [satellite, setSatellite] = useState(false)
   const [rainRadar, setRainRadar] = useState(false)
   const [showCyclones, setShowCyclones] = useState(true)
+  const [stormScope, setStormScope] = useState('global')
   const [storms, setStorms] = useState([])
   const [stormFeed, setStormFeed] = useState({ available: false, status: 'loading', fetchedAt: null, error: null })
   const [analysisStormId, setAnalysisStormId] = useState('')
@@ -73,20 +74,24 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
     }
   }, [])
 
-  // ── Fetch current and recent India-region cyclone events ──────────────────
+  // ── Fetch global or India-region tropical systems ────────────────────────
   const fetchStorms = useCallback(async (showLoading = false) => {
     if (showLoading) setStormFeedLoading(true)
     try {
-      const res = await fetch(`${API_URL}/weather/storms`)
+      const res = await fetch(`${API_URL}/weather/storms?scope=${stormScope}`)
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Unable to load cyclone data')
       if (data.available === true) {
         setStorms(Array.isArray(data.tracks) ? data.tracks : [])
+      } else {
+        setStorms([])
       }
       setStormFeed({
         available: data.available === true,
         status: data.status || 'unavailable',
         fetchedAt: data.fetchedAt || null,
+        scope: data.scope || stormScope,
+        source: data.source || '',
         error: data.available === true ? null : data.error || 'Live cyclone feed is unavailable',
       })
     } catch (error) {
@@ -95,12 +100,14 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
         available: false,
         status: 'unavailable',
         fetchedAt: null,
+        scope: stormScope,
+        source: '',
         error: error.message || 'Live cyclone feed is unavailable',
       })
     } finally {
       if (showLoading) setStormFeedLoading(false)
     }
-  }, [])
+  }, [stormScope])
 
   // ── Fetch rain radar tile endpoint (RainViewer Universal Blue) ───────────
   const fetchRadarUrl = useCallback(async () => {
@@ -115,7 +122,7 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
           setRadarTileUrl(url)
         }
       }
-    } catch (_) {
+    } catch {
       // Fallback default in windy.html
     }
   }, [])
@@ -302,15 +309,20 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
 
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [activeOverlay, satellite, rainRadar, storms, showCyclones, radarTileUrl, postToIframe])
+  }, [activeOverlay, satellite, rainRadar, storms, showCyclones, radarTileUrl, postToIframe, fetchData])
 
   const analysisStorm = storms.find((storm) => storm.id === analysisStormId) || storms[0]
   const analysisCoordinate = analysisStorm?.coordinates?.[analysisStorm.coordinates.length - 1]
-  const stormStatusLabel = (status) => {
-    if (status === 'ACTIVE_LIVE_GDACS') return 'ACTIVE'
-    if (status === 'UPCOMING_GDACS') return 'UPCOMING'
-    if (status === 'RECENT_GDACS') return 'RECENT · ENDED'
-    return 'STATUS UNCONFIRMED'
+  const stormBadge = (status) => {
+    const badges = {
+      ACTIVE_LIVE_GDACS: { label: 'ACTIVE · GDACS', className: 'active' },
+      ACTIVE_ATCF: { label: 'ACTIVE · ATCF', className: 'active' },
+      FORMING_DEPRESSION: { label: 'FORMING DEPRESSION', className: 'forming' },
+      FORMING_INVEST: { label: 'FORMING · INVEST', className: 'forming' },
+      UPCOMING_GDACS: { label: 'UPCOMING', className: 'upcoming' },
+      RECENT_GDACS: { label: 'RECENT · ENDED', className: 'recent' },
+    }
+    return badges[status] || { label: 'STATUS UNCONFIRMED', className: 'unconfirmed' }
   }
   const formatStormDate = (value) => {
     const date = value ? new Date(value) : null
@@ -406,7 +418,17 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
           onClick={toggleSatellite}
           title="Toggle high-resolution satellite imagery on Windy"
         >
-          {satellite ? '🛰️ Satellite On' : '🛰️ Satellite'}
+          {satellite ? '🛰️ NASA Clouds On' : '🛰️ NASA Clouds'}
+        </button>
+
+        {/* RainViewer radar toggle */}
+        <button
+          type="button"
+          className={`btn-control-toggle${rainRadar ? ' active' : ''}`}
+          onClick={toggleRadar}
+          title="Toggle RainViewer precipitation radar"
+        >
+          {rainRadar ? '🌧️ Radar On' : '🌧️ Radar'}
         </button>
 
         {/* Active Cyclones Worldwide toggle */}
@@ -440,6 +462,26 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
             ))}
           </select>
         )}
+
+        {/* Cyclone scope: worldwide forming systems or India region */}
+        <div className="cyclone-scope-group" role="group" aria-label="Cyclone map scope">
+          <button
+            type="button"
+            className={stormScope === 'global' ? 'active' : ''}
+            onClick={() => setStormScope('global')}
+            title="Show tropical systems worldwide"
+          >
+            🌏 Global
+          </button>
+          <button
+            type="button"
+            className={stormScope === 'india' ? 'active' : ''}
+            onClick={() => setStormScope('india')}
+            title="Show only systems near India"
+          >
+            🇮🇳 India
+          </button>
+        </div>
 
         {/* Search Place */}
         <form className="map-place-search" onSubmit={searchPlace}>
@@ -476,10 +518,11 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
           <div>
             <h2 id="cyclone-analysis-title">🌀 Live cyclone analysis</h2>
             <p>
-              GDACS event feed
+              GDACS + NOAA NHC + JTWC ATCF feeds · {stormFeed.scope === 'india' ? 'India region' : 'Global'}
+              {stormFeed.source ? ` · ${stormFeed.source}` : ''}
               {stormFeed.fetchedAt ? ` · checked ${formatStormDate(stormFeed.fetchedAt)}` : ''}
             </p>
-            <p>Reported tracks are not forecasts. Landfall location, timing, and cyclone impacts are unavailable.</p>
+            <p>Reported tracks and provider forecast points are shown; landfall timing and impacts are not guaranteed.</p>
           </div>
           <button type="button" onClick={() => fetchStorms(true)} disabled={stormFeedLoading}>
             {stormFeedLoading ? 'Checking…' : 'Refresh'}
@@ -493,14 +536,14 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
           </p>
         ) : storms.length === 0 ? (
           <p className="cyclone-analysis-status">
-            No active or recent India-region cyclone events are currently listed by GDACS.
+            No active or recent tropical systems are currently listed for {stormScope === 'india' ? 'the India region' : 'the global feed'}.
           </p>
         ) : (
           <>
             <p className="cyclone-analysis-status">
               {stormFeed.status === 'recent_events'
-                ? 'No active event is listed; recent ended events remain visible for 14 days.'
-                : `${storms.filter((storm) => storm.status === 'ACTIVE_LIVE_GDACS').length} active · ${storms.filter((storm) => storm.status === 'UPCOMING_GDACS').length} upcoming · ${storms.filter((storm) => storm.status === 'RECENT_GDACS').length} recent`}
+                ? 'No active systems are listed; recent ended events remain visible for 14 days.'
+                : `${storms.filter((storm) => stormBadge(storm.status).className === 'active').length} active · ${storms.filter((storm) => stormBadge(storm.status).className === 'forming').length} forming · ${storms.filter((storm) => stormBadge(storm.status).className === 'upcoming').length} upcoming · ${storms.filter((storm) => stormBadge(storm.status).className === 'recent').length} recent`}
             </p>
             <div className="cyclone-analysis-list">
               {storms.map((storm) => (
@@ -512,27 +555,29 @@ export default function WindyMap({ onSwitchToMap, sharedLocation, onLocationChan
                 >
                   <span className="cyclone-analysis-event-title">
                     <strong>{storm.name.replace(/^🌀\s*/, '')}</strong>
-                    <span className={`cyclone-event-status ${storm.status.toLowerCase()}`}>
-                      {stormStatusLabel(storm.status)}
+                    <span className={`cyclone-event-status ${stormBadge(storm.status).className}`}>
+                      {stormBadge(storm.status).label}
                     </span>
                   </span>
-                  <span>{storm.category} · {storm.maxWindKmh ? `${storm.maxWindKmh} km/h max wind` : 'wind not reported'}</span>
-                  <span>{storm.validFrom ? formatStormDate(storm.validFrom) : 'Start date not reported'} – {storm.validUntil ? formatStormDate(storm.validUntil) : 'End date not reported'}</span>
+                  <span>{storm.category} · {storm.maxWindKmh ? `${storm.maxWindKmh} km/h max wind` : 'wind not reported'}{storm.source ? ` · ${storm.source}` : ''}</span>
+                  <span>{storm.validFrom ? formatStormDate(storm.validFrom) : 'Start date not reported'} – {storm.validUntil ? formatStormDate(storm.validUntil) : 'End date not reported'}{storm.forecastTrack?.length ? ` · ${storm.forecastTrack.length} forecast points` : ''}</span>
                 </button>
               ))}
             </div>
             {analysisStorm && (
               <div className="cyclone-analysis-detail">
                 <strong>
-                  {analysisStorm.status === 'RECENT_GDACS' ? 'Last reported position' : 'Reported position'}
+                  {analysisStorm.status === 'RECENT_GDACS' ? 'Last reported position' : 'Reported eye position'}
                   {analysisCoordinate ? ` · ${analysisCoordinate[0].toFixed(2)}°, ${analysisCoordinate[1].toFixed(2)}°` : ''}
                 </strong>
                 <span>
-                  {analysisStorm.locationType === 'LineString'
-                    ? `Provider-reported track · ${analysisStorm.coordinates.length} positions; no landfall forecast is available here.`
-                    : 'GDACS supplied a point location; it did not provide a centerline track for this event.'}
+                  {analysisStorm.forecastTrack?.length
+                    ? `${analysisStorm.forecastTrack.length} provider forecast points are drawn as an orange cone on the map.`
+                    : analysisStorm.locationType === 'LineString'
+                      ? `Provider-reported track · ${analysisStorm.coordinates.length} positions; no centerline forecast was supplied.`
+                      : 'A point position only; no centerline forecast was supplied by the provider.'}
                 </span>
-                <span>Last provider update: {formatStormDate(analysisStorm.lastUpdated)}</span>
+                <span>Provider(s): {analysisStorm.source || analysisStorm.sources?.join(' + ') || 'unknown'} · Last update: {formatStormDate(analysisStorm.lastUpdated)}</span>
                 {analysisStorm.reportUrl && (
                   <a href={analysisStorm.reportUrl} target="_blank" rel="noreferrer">
                     Open GDACS event report

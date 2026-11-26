@@ -65,6 +65,28 @@ def health() -> dict[str, str]:
     }
 
 
+@app.get("/model-info")
+def model_info() -> dict[str, object]:
+    """Expose the exact loaded artifacts, trainers and documentation.
+
+    This makes it possible to inspect what the service is actually running
+    without reading the source files. No API keys or live credentials are
+    returned here.
+    """
+    return {
+        "apiVersion": app.version,
+        "floodBaseline": model,
+        "telemetryRisk": telemetry_model,
+        "trainingScripts": [
+            "Backend/ml_service/training/train_model.py",
+            "Backend/ml_service/training/train_telemetry_model.py",
+        ],
+        "documentation": "Backend/ml_service/README.md",
+        "runtimeFiles": ["Backend/ml_service/main.py"],
+        "note": "No local chat model is trained; chat uses FAQ cache, approved-document RAG, and a remote provider.",
+    }
+
+
 @app.post("/predict")
 def predict(request: PredictionRequest) -> dict[str, object]:
     is_telemetry = set(request.features) == TELEMETRY_FEATURES

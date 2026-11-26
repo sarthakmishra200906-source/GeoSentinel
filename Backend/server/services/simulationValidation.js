@@ -74,6 +74,30 @@ function validateFixedRoute(parameters, cyclone, rainfall, capacity) {
   }
 }
 
+function validateWeatherSteering(value, durationHours) {
+  if (value === undefined || value === null || value === '') return []
+  if (!Array.isArray(value)) {
+    const error = new Error('cyclone.weatherSteering must be an array of hourly steering values')
+    error.statusCode = 400
+    throw error
+  }
+  if (value.length > MAX_ROUTE_POINTS + 28) {
+    const error = 'cyclone.weatherSteering cannot contain more than 48 hourly values'
+    throw Object.assign(new Error(error), { statusCode: 400 })
+  }
+  return value.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw Object.assign(new Error(`cyclone.weatherSteering[${index}] must be an object`), { statusCode: 400 })
+    }
+    const hour = entry.hour ?? index + 1
+    assertNumber(hour, `cyclone.weatherSteering[${index}].hour`, { min: 1, max: 48 })
+    assertNumber(entry.headingDeg, `cyclone.weatherSteering[${index}].headingDeg`, { min: 0, max: 360 })
+    assertNumber(entry.forwardSpeedKmh, `cyclone.weatherSteering[${index}].forwardSpeedKmh`, { min: 5, max: 80 })
+    if (hour > durationHours) return null
+    return { hour, headingDeg: Number(((entry.headingDeg % 360) + 360) % 360), forwardSpeedKmh: Number(entry.forwardSpeedKmh) }
+  }).filter(Boolean)
+}
+
 function validateForwardForecast(parameters, cyclone, rainfall, capacity) {
   assertNumber(cyclone.startLatitude ?? 17.6, 'cyclone.startLatitude', { min: -90, max: 90 })
   assertNumber(cyclone.startLongitude ?? 88.8, 'cyclone.startLongitude', { min: -180, max: 180 })
@@ -99,6 +123,7 @@ function validateForwardForecast(parameters, cyclone, rainfall, capacity) {
       windSpeedKmh: cyclone.windSpeedKmh ?? 120,
       centralPressureHpa: cyclone.centralPressureHpa ?? 990,
       galeRadiusKm: cyclone.galeRadiusKm ?? 180,
+      weatherSteering: validateWeatherSteering(cyclone.weatherSteering, durationHours),
     },
     geography: 'GLOBAL',
     dataSource: 'imd_style_forward_forecast',

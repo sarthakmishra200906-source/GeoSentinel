@@ -13,7 +13,12 @@ const simulationRunSchema = new mongoose.Schema(
     simulationTime: { type: Date, default: null },
     sequence: { type: Number, default: 0, min: 0 },
     clockMode: { type: String, enum: ['REAL_TIME', 'DEMO_ACCELERATED', 'OFFLINE'], default: 'DEMO_ACCELERATED' },
-    dataSource: { type: String, enum: ['synthetic_simulation'], default: 'synthetic_simulation', immutable: true },
+    dataSource: {
+      type: String,
+      enum: ['synthetic_simulation', 'imd_style_forward_forecast'],
+      default: 'synthetic_simulation',
+      immutable: true,
+    },
     engineVersion: { type: String, default: 'rule-matrix-v1', immutable: true },
     ownerHeartbeatAt: { type: Date, default: null },
     failure: { type: mongoose.Schema.Types.Mixed, default: null },

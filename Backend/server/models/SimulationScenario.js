@@ -10,7 +10,7 @@ const simulationScenarioSchema = new mongoose.Schema(
     rulesetVersion: { type: String, required: true, trim: true, maxlength: 80 },
     dataSource: {
       type: String,
-      enum: ['synthetic_simulation'],
+      enum: ['synthetic_simulation', 'imd_style_forward_forecast'],
       default: 'synthetic_simulation',
       immutable: true,
     },

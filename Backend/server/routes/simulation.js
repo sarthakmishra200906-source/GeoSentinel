@@ -8,7 +8,7 @@ import SimulationReport from '../models/SimulationReport.js'
 import { requireAdmin } from '../middleware/admin.js'
 import { recordAuditEvent } from '../services/audit.js'
 import { validateSimulationName, validateSimulationParameters } from '../services/simulationValidation.js'
-import { calculateSimulationStep } from '../services/simulationEngine.js'
+import { calculateSimulationStep, projectForwardTrack } from '../services/simulationEngine.js'
 import { buildSimulationPdf, createSimulationReportSummary } from '../services/simulationPdfReport.js'
 import { deleteSimulationRunData } from '../services/simulationRunDeletion.js'
 import { deleteSimulationReport } from '../services/simulationReportDeletion.js'
@@ -29,6 +29,7 @@ router.get('/steering-wind', ...requireAdmin, async (request, response, next) =>
       response.status(400).json({ error: 'Valid latitude and longitude are required' })
       return
     }
+    const requestedHours = Math.max(1, Math.min(48, Math.floor(Number(request.query.hours) || 1)))
     const url = new URL('https://api.open-meteo.com/v1/forecast')
     url.searchParams.set('latitude', String(latitude))
     url.searchParams.set('longitude', String(longitude))
@@ -36,9 +37,22 @@ router.get('/steering-wind', ...requireAdmin, async (request, response, next) =>
       'hourly',
       'wind_speed_500hPa,wind_direction_500hPa,wind_speed_700hPa,wind_direction_700hPa',
     )
-    url.searchParams.set('forecast_days', '1')
+    url.searchParams.set('forecast_days', requestedHours > 24 ? '2' : '1')
     url.searchParams.set('timezone', 'UTC')
-    const providerResponse = await fetch(url, { signal: AbortSignal.timeout(8000) })
+    const controller = new AbortController()
+    const timeout = setTimeout(
+      () => controller.abort(),
+      Number(process.env.STEERING_TIMEOUT_MS) || 8000,
+    )
+    let providerResponse
+    try {
+      providerResponse = await fetch(url, { signal: controller.signal })
+    } catch (error) {
+      response.status(502).json({ error: 'Steering wind provider is unavailable or timed out' })
+      return
+    } finally {
+      clearTimeout(timeout)
+    }
     if (!providerResponse.ok) {
       response.status(502).json({ error: 'Steering wind provider is unavailable' })
       return
@@ -57,23 +71,54 @@ router.get('/steering-wind', ...requireAdmin, async (request, response, next) =>
     }
     const use500 = Number.isFinite(Number(hourly.wind_speed_500hPa?.[upperLevelIndex]))
     const level = use500 ? '500hPa' : '700hPa'
-    const windDirectionDeg = Number(
-      (use500 ? hourly.wind_direction_500hPa : hourly.wind_direction_700hPa)[upperLevelIndex],
-    )
-    const windSpeedKmh = Number(
-      (use500 ? hourly.wind_speed_500hPa : hourly.wind_speed_700hPa)[upperLevelIndex],
-    )
-    const headingDeg = Math.round((windDirectionDeg + 180) % 360)
-    const forwardSpeedKmh = Math.round(Math.min(80, Math.max(5, windSpeedKmh * 0.35)))
+    const directionValues = use500 ? hourly.wind_direction_500hPa : hourly.wind_direction_700hPa
+    const speedValues = use500 ? hourly.wind_speed_500hPa : hourly.wind_speed_700hPa
+    const times = Array.isArray(hourly.time) ? hourly.time : []
+    const steering = []
+    for (let index = 0; index < Math.min(times.length, directionValues.length, speedValues.length); index += 1) {
+      const direction = Number(directionValues[index])
+      const speed = Number(speedValues[index])
+      if (!Number.isFinite(direction) || !Number.isFinite(speed)) continue
+      steering.push({
+        hour: steering.length + 1,
+        time: times[index],
+        windDirectionDeg: Math.round(direction),
+        windSpeedKmh: Math.round(speed),
+        headingDeg: Math.round((direction + 180) % 360),
+        forwardSpeedKmh: Math.round(Math.min(80, Math.max(5, speed * 0.35))),
+      })
+      if (steering.length >= requestedHours) break
+    }
+    if (!steering.length) {
+      response.status(502).json({ error: 'Steering wind data is unavailable for this location' })
+      return
+    }
+    const first = steering[0]
     response.json({
       available: true,
       provider: 'Open-Meteo',
       level,
-      sampledAt: hourly.time?.[upperLevelIndex] || null,
-      windDirectionDeg,
-      windSpeedKmh,
-      headingDeg,
-      forwardSpeedKmh,
+      sampledAt: times[upperLevelIndex] || first.time,
+      windDirectionDeg: first.windDirectionDeg,
+      windSpeedKmh: first.windSpeedKmh,
+      headingDeg: first.headingDeg,
+      forwardSpeedKmh: first.forwardSpeedKmh,
+      steering,
+      hours: steering.length,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// Expected track for the configured weather scenario, drawn before any hour
+// is committed. Uses the same engine as the saved steps.
+router.post('/preview', ...requireAdmin, async (request, response, next) => {
+  try {
+    const parameters = validateSimulationParameters(request.body?.parameters)
+    response.json({
+      simulationMode: true,
+      ...projectForwardTrack(parameters, request.body?.hours),
     })
   } catch (error) {
     next(error)
@@ -155,6 +200,7 @@ router.post('/scenarios', ...requireAdmin, async (request, response, next) => {
       name: validateSimulationName(request.body.name),
       version: 1,
       parameters,
+      dataSource: parameters.dataSource || 'synthetic_simulation',
       seed: request.body.seed || crypto.randomUUID(),
       rulesetVersion: parameters.mode === 'forward_forecast' ? 'forward-forecast-v1' : 'rule-matrix-v1',
       createdBy: request.user._id,
@@ -206,6 +252,8 @@ router.post('/runs', ...requireAdmin, async (request, response, next) => {
       status: 'READY',
       clockMode: request.body.clockMode || 'DEMO_ACCELERATED',
       simulationTime: new Date(),
+      dataSource: scenario.parameters?.dataSource || 'synthetic_simulation',
+      engineVersion: scenario.rulesetVersion || 'rule-matrix-v1',
     })
     await recordAuditEvent({
       request,

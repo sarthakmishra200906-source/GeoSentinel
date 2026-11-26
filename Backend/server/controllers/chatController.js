@@ -13,6 +13,32 @@ const retrievalStopWords = new Set([
   'what', 'when', 'where', 'which', 'who', 'with', 'you', 'your',
 ])
 const promptInjectionPattern = /\b(ignore|disregard|override)\b.{0,100}\b(instructions?|rules?|grounding|evacuation|assistant)\b/i
+const MAX_ANSWER_LINES = 10
+
+// Keeps every reply short, plain text, and safe for the browser speech engine.
+// Provider prompts ask for this too; this is the hard guarantee for older or
+// local models that ignore formatting instructions.
+function formatChatAnswer(value) {
+  if (typeof value !== 'string') return value
+  return value
+    .replace(/\r\n?/g, '\n')
+    .replace(/\*\*|__|`/g, '')
+    .replace(/^\s{0,3}#{1,6}\s*/gm, '')
+    .replace(/^\s*>\s?/gm, '')
+    .replace(/^\s*[-*+•]\s+/gm, '')
+    .replace(/^\s*\d+[.)]\s+/gm, '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, MAX_ANSWER_LINES)
+    .join('\n')
+}
+
+// Keep the three-source contract even when a safety fallback is appended.
+function withFallbackSource(sources, fallbackSource) {
+  const base = sources.length >= 3 ? sources.slice(0, 2) : sources.slice()
+  return [...base, fallbackSource]
+}
 
 export async function handleUserChat(request, response, next) {
   try {
@@ -29,14 +55,14 @@ export async function handleUserChat(request, response, next) {
         success: true,
         data: {
           userMessage: message.trim(),
-          answer: cachedAnswer.answer,
-          aiResponse: cachedAnswer.answer,
+          answer: formatChatAnswer(cachedAnswer.answer),
+          aiResponse: formatChatAnswer(cachedAnswer.answer),
           currentMemorySummary: request.user?.memorySummary || 'No signed-in chat history.',
           grounded: true,
           status: 'GROUNDED',
           warnings: [],
           sourceType: 'builtin',
-          sources: [cachedAnswer.source],
+          sources: [{ label: 'Built-in disaster safety guidance', ...cachedAnswer.source }],
         },
       })
       return
@@ -70,32 +96,50 @@ export async function handleUserChat(request, response, next) {
     const phraseSupported = !requestedUnsupportedPhrase || documents.some((document) =>
       document.chunks.some((chunk) => /(crop\s+loss|toll[-\s]?free\s+helpline)/i.test(chunk.text)),
     )
+    // Inverse-document-frequency weighting stops common words such as
+    // "guidelines" or "national" from outranking the rare terms that actually
+    // identify the requested section in a long government document.
+    const chunkEntries = documents.flatMap((document) =>
+      document.chunks.map((chunk) => ({ document, chunk, text: chunk.text.toLowerCase() })),
+    )
+    const termFrequency = new Map()
+    for (const term of terms) {
+      termFrequency.set(term, chunkEntries.reduce((count, entry) => count + (entry.text.includes(term) ? 1 : 0), 0))
+    }
     const matches = promptInjectionPattern.test(message) || !phraseSupported
       ? []
-      : documents
-      .flatMap((document) =>
-        document.chunks
-          .map((chunk) => {
-            const chunkText = chunk.text.toLowerCase()
-            const termScore = terms.reduce((score, term) => score + (chunkText.includes(term) ? 1 : 0), 0)
-            const phraseScore = phrase.length > 12 && chunkText.includes(phrase) ? 3 : 0
-            return { document, chunk, score: termScore + phraseScore }
-          }),
-      )
-      .filter((match) => match.score > 0)
-      .sort((left, right) => right.score - left.score)
-      .slice(0, 8)
+      : chunkEntries
+        .map(({ document, chunk, text }) => {
+          const termScore = terms.reduce((score, term) => {
+            const frequency = termFrequency.get(term) || 0
+            return score + (text.includes(term) ? 1 + 4 / (1 + frequency) : 0)
+          }, 0)
+          const phraseScore = phrase.length > 12 && text.includes(phrase) ? 6 : 0
+          return { document, chunk, score: termScore + phraseScore }
+        })
+        .filter((match) => match.score > 0)
+        .sort((left, right) => right.score - left.score)
+        .slice(0, 3)
 
+    // A fact can sit just across a 900-character chunk boundary on the same
+    // page. Give the model the matched chunk plus its immediate page neighbours
+    // while still returning only three compact source chips.
+    const contextMatches = matches.map((match) => {
+      const pageChunks = match.document.chunks.filter((chunk) => chunk.page === match.chunk.page)
+      const index = pageChunks.indexOf(match.chunk)
+      const nearby = pageChunks.slice(Math.max(0, index - 1), index + 2)
+      return { ...match, chunk: { ...match.chunk, text: nearby.map((chunk) => chunk.text).join('\n') } }
+    })
     const generated = promptInjectionPattern.test(message)
       ? {
           status: 'NO_SUPPORT',
           answer: 'I cannot help with that request. Ask a disaster-safety question, and follow official local instructions.',
           warning: null,
         }
-      : await generateGroundedAnswer({ question: message.trim(), matches })
+      : await generateGroundedAnswer({ question: message.trim(), matches: contextMatches })
     const modelRefused = typeof generated.answer === 'string' && /\bNO_SUPPORT\b/i.test(generated.answer)
     let responseStatus = modelRefused ? 'NO_SUPPORT' : generated.status
-    let answer = modelRefused ? null : generated.answer
+    let answer = modelRefused ? null : formatChatAnswer(generated.answer)
     let warnings = generated.warning ? [generated.warning] : []
     let sources = matches.map(({ document, chunk }) => ({
       documentId: document._id,
@@ -104,19 +148,20 @@ export async function handleUserChat(request, response, next) {
       officialUrl: document.officialUrl,
       section: chunk.section,
       page: chunk.page,
-      context: chunk.text,
+      label: `${document.title}${chunk.page ? `, p. ${chunk.page}` : ''}`,
     }))
 
     // Safe general-question fallback when LLM is unavailable, refuses, or errors out
     if (responseStatus === 'PROVIDER_UNAVAILABLE') {
       answer = 'The AI provider is not configured on this server. Set GOOGLE_GEMINI_API_KEY (or GEMINI_API_KEY) in the backend environment. For immediate emergency help, dial 112 (National Emergency Helpline) or contact local disaster authorities.'
-      sources.push({
+      sources = withFallbackSource(sources, {
         documentId: 'general-emergency-advice',
         title: 'Emergency Response and Public Safety Advisory',
         issuingAuthority: 'National Disaster Management Guidelines',
         officialUrl: 'https://ndma.gov.in',
         section: 'Public Safety',
         page: 1,
+        label: 'Emergency Response and Public Safety Advisory',
       })
     } else if (!answer || responseStatus === 'NO_SUPPORT' || responseStatus.startsWith('PROVIDER_')) {
       const diagMsg = generated.diagnostics?.httpStatus
@@ -127,25 +172,27 @@ export async function handleUserChat(request, response, next) {
         answer = fallback.answer
         responseStatus = 'SAFE_FALLBACK'
         warnings.push(`AI provider offline/unreachable (${diagMsg}). Answering from verified disaster safety preparedness standards.`)
-        sources.push({
+        sources = withFallbackSource(sources, {
           documentId: 'safe-disaster-knowledge-fallback',
           title: 'National Disaster Preparedness & Safety Guidelines',
           issuingAuthority: 'NDMA Public Safety Standards',
           officialUrl: 'https://ndma.gov.in',
           section: fallback.topic || 'General Safety',
           page: 1,
+          label: 'National Disaster Preparedness & Safety Guidelines',
         })
       } else {
         answer = 'For immediate emergency assistance, dial 112 (National Emergency Helpline) or contact local disaster authorities. In general disaster situations: move to higher ground in floods, stay indoors in sturdy shelters during storms or cyclones, avoid touch with downed electrical lines or flooded roads, and keep an emergency go-bag ready with water, dry food, and essential medications.'
         responseStatus = 'SAFE_FALLBACK'
         warnings.push(`AI provider offline/unreachable (${diagMsg}). Showing verified public disaster safety advisory.`)
-        sources.push({
+        sources = withFallbackSource(sources, {
           documentId: 'general-emergency-advice',
           title: 'Emergency Response and Public Safety Advisory',
           issuingAuthority: 'National Disaster Management Guidelines',
           officialUrl: 'https://ndma.gov.in',
           section: 'Public Safety',
           page: 1,
+          label: 'Emergency Response and Public Safety Advisory',
         })
       }
     }

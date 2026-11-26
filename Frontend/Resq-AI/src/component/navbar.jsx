@@ -410,6 +410,48 @@ class HelpPanel extends Component {
   }
 }
 
+// The browser speech engine reads Markdown symbols literally ("asterisk",
+// "star"). Normalise provider output into the same calm, spoken phrasing a
+// live voice assistant would use.
+function toSpeakableText(answer) {
+  if (typeof answer !== 'string') return ''
+  return answer
+    .replace(/\*\*|__|`|#{1,6}/g, '')
+    .replace(/\[[^\]]+\]/g, '')
+    .replace(/^\s*[-*+•>]\s+/gm, '')
+    .replace(/^\s*\d+[.)]\s+/gm, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n+/g, '. ')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([.,;:!?])/g, '$1')
+    .replace(/\.{2,}/g, '.')
+    .trim()
+}
+
+// Chrome can stop a long utterance after roughly 15 seconds, so playback is
+// queued in short sentence-sized chunks instead of one very long utterance.
+function splitSpeechChunks(text, maxLength = 180) {
+  const sentences = text.match(/[^.!?]+[.!?]*/g)?.map((part) => part.trim()).filter(Boolean) || [text]
+  const chunks = []
+  let current = ''
+  for (const sentence of sentences) {
+    if (current && current.length + sentence.length + 1 > maxLength) {
+      chunks.push(current)
+      current = sentence
+    } else {
+      current = current ? `${current} ${sentence}` : sentence
+    }
+  }
+  if (current) chunks.push(current)
+  return chunks
+}
+
+function compactSourceLabel(source) {
+  if (source.label) return source.label
+  const title = source.title || 'Approved guideline'
+  return source.page ? `${title}, p. ${source.page}` : title
+}
+
 class AiPanel extends Component {
   state = {
     message: '',
@@ -429,6 +471,11 @@ class AiPanel extends Component {
   restartTimer = null
   shouldContinueListening = false
   voiceTranscript = ''
+  speechQueue = []
+  speechIndex = 0
+  speechToken = 0
+  speechStartTimer = null
+  speechResumeTimer = null
 
   componentDidMount() {
     this.checkApiIdentity()
@@ -436,7 +483,7 @@ class AiPanel extends Component {
 
   componentWillUnmount() {
     this.stopListening()
-    window.speechSynthesis?.cancel()
+    this.stopSpeaking()
   }
 
   checkApiIdentity = async () => {
@@ -585,23 +632,87 @@ class AiPanel extends Component {
   }
 
   speakAnswer = (explicitText) => {
-    const answer = explicitText || this.state.response?.answer
+    const answer = toSpeakableText(explicitText || this.state.response?.answer)
     if (!answer || !window.speechSynthesis || !window.SpeechSynthesisUtterance) {
       this.setState({ error: 'Voice playback is not supported by this browser.' })
       return
     }
-    window.speechSynthesis.cancel()
-    const utterance = new window.SpeechSynthesisUtterance(answer)
-    utterance.rate = 1.0
-    utterance.pitch = 1.0
-    utterance.onstart = () => this.setState({ isSpeaking: true })
-    utterance.onend = () => this.setState({ isSpeaking: false })
-    utterance.onerror = () => this.setState({ isSpeaking: false })
+    this.stopSpeaking()
+    const token = ++this.speechToken
+    const voices = window.speechSynthesis.getVoices?.() || []
+    const preferredVoice = voices.find((voice) => /^en[-_]IN/i.test(voice.lang))
+      || voices.find((voice) => /^en/i.test(voice.lang) && /natural|neural|google/i.test(voice.name))
+      || voices.find((voice) => /^en/i.test(voice.lang))
+      || null
+    // Never force an 'en-IN' language tag when no such voice is installed:
+    // some browsers then select no voice at all and play nothing.
+    const language = preferredVoice?.lang || 'en-US'
+    this.speechQueue = splitSpeechChunks(answer)
+    this.speechIndex = 0
     this.setState({ isSpeaking: true })
+    // Chrome drops a speak() call issued immediately after cancel(). Wait for
+    // the cancel to settle before queueing the first chunk.
+    this.speechStartTimer = window.setTimeout(() => {
+      if (token === this.speechToken) this.speakNextChunk(token, preferredVoice, language)
+    }, 120)
+  }
+
+  speakNextChunk = (token, voice, language) => {
+    if (token !== this.speechToken) return
+    if (this.speechIndex >= this.speechQueue.length) {
+      this.finishSpeaking()
+      return
+    }
+    const utterance = new window.SpeechSynthesisUtterance(this.speechQueue[this.speechIndex])
+    if (voice) utterance.voice = voice
+    utterance.lang = voice?.lang || language
+    utterance.rate = 1.03
+    utterance.pitch = 1
+    utterance.volume = 1
+    utterance.onstart = () => {
+      if (token !== this.speechToken) return
+      this.setState({ isSpeaking: true })
+      // Chrome pauses long speech after ~15s; a periodic resume keeps it going.
+      window.clearInterval(this.speechResumeTimer)
+      this.speechResumeTimer = window.setInterval(() => {
+        if (token === this.speechToken) window.speechSynthesis?.resume?.()
+      }, 5000)
+    }
+    utterance.onend = () => {
+      if (token !== this.speechToken) return
+      this.speechIndex += 1
+      if (this.speechIndex < this.speechQueue.length) {
+        this.speakNextChunk(token, voice, language)
+      } else {
+        this.finishSpeaking()
+      }
+    }
+    utterance.onerror = (event) => {
+      if (token !== this.speechToken) return
+      if (event?.error && !['interrupted', 'canceled'].includes(event.error)) {
+        this.setState({ error: `Voice playback stopped: ${event.error}. Tap Read aloud to retry.` })
+      }
+      this.finishSpeaking()
+    }
     window.speechSynthesis.speak(utterance)
   }
 
+  finishSpeaking = () => {
+    window.clearInterval(this.speechResumeTimer)
+    window.clearTimeout(this.speechStartTimer)
+    this.speechResumeTimer = null
+    this.speechStartTimer = null
+    this.setState({ isSpeaking: false })
+  }
+
   stopSpeaking = () => {
+    this.speechToken = (this.speechToken || 0) + 1
+    window.clearInterval(this.speechResumeTimer)
+    window.clearTimeout(this.speechStartTimer)
+    this.speechResumeTimer = null
+    this.speechStartTimer = null
+    this.speechQueue = []
+    this.speechIndex = 0
     window.speechSynthesis?.cancel()
     this.setState({ isSpeaking: false })
   }
@@ -683,12 +794,9 @@ class AiPanel extends Component {
   }
 
   render() {
-    const sources = [...new Map(
-      (this.state.response?.sources || []).map((source) => [
-        `${source.documentId}-${source.page ?? source.section ?? source.officialUrl}`,
-        source,
-      ]),
-    ).values()]
+    // The backend already returns the top 3 distinct chunks; keep all of them
+    // so the chips match the evidence used for the answer.
+    const sources = this.state.response?.sources || []
 
     const suggestions = [
       { icon: '🌪️', label: 'Cyclone checklist', query: 'What should I do before a cyclone?' },
@@ -822,18 +930,22 @@ class AiPanel extends Component {
 
             {sources.length > 0 && (
               <div className="chat-sources-section">
-                <span className="chat-sources-title">Verified Official References:</span>
-                <ul className="chat-sources-list">
-                  {sources.map((source) => (
-                    <li key={`${source.documentId}-${source.page ?? source.section ?? source.officialUrl}`}>
-                      <a href={source.officialUrl} target="_blank" rel="noreferrer">
-                        {source.title}
-                      </a>
-                      {source.issuingAuthority ? ` (${source.issuingAuthority})` : ''}
-                      {source.page ? `, p. ${source.page}` : ''}
-                    </li>
+                <span className="chat-sources-title">Sources</span>
+                <div className="chat-sources-list">
+                  {sources.map((source, index) => (
+                    <a
+                      key={`${source.documentId}-${source.page ?? source.section ?? source.officialUrl}-${index}`}
+                      className="chat-source-chip"
+                      href={source.officialUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={source.issuingAuthority || compactSourceLabel(source)}
+                    >
+                      {compactSourceLabel(source)}
+                      <span aria-hidden="true">↗</span>
+                    </a>
                   ))}
-                </ul>
+                </div>
               </div>
             )}
 

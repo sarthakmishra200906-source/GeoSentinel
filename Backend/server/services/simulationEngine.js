@@ -39,6 +39,8 @@ const STATE_CENTROIDS = {
 const WEST_COAST = [[8, 77], [15, 73], [20, 70], [24, 72], [30, 76], [35, 78]]
 const EAST_COAST = [[8, 81], [15, 80], [18, 84], [20, 86], [22, 89], [24, 92], [27, 95], [30, 96], [35, 92]]
 const CONE_ANCHORS = [[0, 0], [6, 25], [12, 45], [24, 75], [48, 120]]
+const RECURVATURE_START_HOUR = 8
+const RECURVATURE_SPAN_HOURS = 28
 
 function clamp(value, min = 0, max = 1) {
   return Math.max(min, Math.min(max, value))
@@ -61,6 +63,26 @@ function toDegrees(radians) {
 
 function normalizeBearing(degrees) {
   return ((degrees % 360) + 360) % 360
+}
+
+function smoothstep(value) {
+  const fraction = clamp(value)
+  return fraction * fraction * (3 - 2 * fraction)
+}
+
+// IMD bulletins describe a small initial west/northwest movement followed by
+// gradual north or north-northeast recurvature. A constant bearing draws a
+// straight line, so steer the base heading toward the poleward quadrant with
+// a smooth S-curve. Hourly weather steering already carries real flow, so the
+// recurvature contribution is deliberately smaller for those runs.
+function imdRecurvature(hour, headingDeg, latitude, weatherSteered) {
+  const hemisphere = latitude >= 0 ? 1 : -1
+  const polewardTarget = hemisphere > 0 ? 20 : 200
+  const signedDelta = ((polewardTarget - headingDeg + 540) % 360) - 180
+  const strength = weatherSteered ? 0.22 : 0.5
+  const ramp = smoothstep((hour - RECURVATURE_START_HOUR) / RECURVATURE_SPAN_HOURS)
+  const wobble = 1.3 * Math.sin(hour / 5) * hemisphere
+  return signedDelta * strength * ramp + wobble
 }
 
 function distanceKm(start, end) {
@@ -278,15 +300,31 @@ function calculateForwardStep(parameters, sequence, previousTimestamp) {
   const galeRadiusKm = cyclone.galeRadiusKm ?? 180
   const hourlyRain = rainfall.hourlyMm ?? 80
 
+  const weatherSteering = Array.isArray(cyclone.weatherSteering) ? cyclone.weatherSteering : []
   let position = start
   let windSpeedKmh = cyclone.windSpeedKmh ?? 120
   let landfall = false
+  let weatherSteeredHours = 0
+  let appliedHeadingDeg = headingDeg
+  let forecastHeadingDeg = headingDeg
+  let recurvatureDeg = 0
+  let appliedForwardSpeedKmh = forwardSpeedKmh
   for (let hour = 1; hour <= leadHours; hour += 1) {
-    // Beta drift deflects the track slightly west/poleward in the Northern
-    // Hemisphere (mirrored in the Southern Hemisphere).
-    const bearing = normalizeBearing(headingDeg + (position.latitude >= 0 ? -2.5 : 2.5))
+    // When hourly Open-Meteo steering is attached to the scenario, the eye
+    // follows that weather flow. Otherwise it uses the configured heading/speed.
+    const hourlySteer = weatherSteering.find((entry) => entry?.hour === hour)
+    const steeringHeading = hourlySteer ? Number(hourlySteer.headingDeg) : headingDeg
+    const hourSpeed = hourlySteer ? Number(hourlySteer.forwardSpeedKmh) : forwardSpeedKmh
+    if (hourlySteer) weatherSteeredHours += 1
+    appliedHeadingDeg = steeringHeading
+    recurvatureDeg = imdRecurvature(hour, steeringHeading, position.latitude, Boolean(hourlySteer))
+    forecastHeadingDeg = normalizeBearing(steeringHeading + recurvatureDeg)
+    appliedForwardSpeedKmh = hourSpeed
+    // Beta drift adds a small west/poleward correction on top of the
+    // recurvature (mirrored in the Southern Hemisphere).
+    const bearing = normalizeBearing(forecastHeadingDeg + (position.latitude >= 0 ? -1.2 : 1.2))
     const driftLatitude = position.latitude >= 0 ? 0.04 : -0.04
-    const next = destinationPoint(position.latitude, position.longitude, bearing, forwardSpeedKmh)
+    const next = destinationPoint(position.latitude, position.longitude, bearing, hourSpeed)
     position = {
       latitude: clamp(next.latitude + driftLatitude, -89.9, 89.9),
       longitude: next.longitude,
@@ -312,8 +350,15 @@ function calculateForwardStep(parameters, sequence, previousTimestamp) {
       startLatitude: start.latitude,
       startLongitude: start.longitude,
       headingDeg,
-      effectiveHeadingDeg: normalizeBearing(headingDeg + (position.latitude >= 0 ? -2.5 : 2.5)),
+      appliedHeadingDeg,
+      forecastHeadingDeg: Number(forecastHeadingDeg.toFixed(2)),
+      recurvatureDeg: Number(recurvatureDeg.toFixed(2)),
+      trackModel: 'imd_style_recurving',
+      effectiveHeadingDeg: normalizeBearing(forecastHeadingDeg + (position.latitude >= 0 ? -1.2 : 1.2)),
       forwardSpeedKmh,
+      appliedForwardSpeedKmh,
+      steeringSource: weatherSteering.length ? 'open_meteo_hourly' : 'configured',
+      weatherSteeredHours,
       centralPressureHpa: cyclone.centralPressureHpa ?? 990,
       galeRadiusKm,
       coneRadiusKm: Math.round(coneRadiusKm),
@@ -458,6 +503,50 @@ export function calculateSimulationStep(parameters, sequence, previousTimestamp)
     return calculateFixedRouteStep(parameters, sequence, previousTimestamp)
   }
   return calculateForwardStep(parameters, sequence, previousTimestamp)
+}
+
+// Full expected track for the configured scenario. It reuses the same hourly
+// engine as saved steps, so the dashed preview and the committed path cannot
+// disagree. Weather steering from the scenario is applied hour by hour.
+export function projectForwardTrack(parameters, requestedHours) {
+  const configuredHours = parameters?.cyclone?.durationHours ?? parameters?.rainfall?.durationHours ?? 24
+  const durationHours = Math.max(1, Math.min(48, Math.floor(Number(requestedHours ?? configuredHours) || 24)))
+  const positions = []
+  let previousTimestamp = null
+  let lastStep = null
+  for (let hour = 1; hour <= durationHours; hour += 1) {
+    lastStep = calculateSimulationStep(parameters, hour, previousTimestamp)
+    previousTimestamp = lastStep.timestamp
+    positions.push({
+      hour,
+      latitude: lastStep.cyclone.positionLatitude,
+      longitude: lastStep.cyclone.positionLongitude,
+      windSpeedKmh: lastStep.cyclone.windSpeedKmh,
+      centralPressureHpa: lastStep.cyclone.centralPressureHpa ?? null,
+      coneRadiusKm: lastStep.cyclone.coneRadiusKm ?? 0,
+      isLandfall: Boolean(lastStep.cyclone.isLandfall),
+      riskTier: lastStep.impacts.riskTier,
+      headingDeg: lastStep.cyclone.forecastHeadingDeg ?? lastStep.cyclone.appliedHeadingDeg ?? lastStep.cyclone.headingDeg ?? null,
+      configuredHeadingDeg: lastStep.cyclone.appliedHeadingDeg ?? lastStep.cyclone.headingDeg ?? null,
+      forwardSpeedKmh: lastStep.cyclone.appliedForwardSpeedKmh ?? lastStep.cyclone.forwardSpeedKmh ?? null,
+    })
+  }
+  const landfallPoint = positions.find((point) => point.isLandfall) || null
+  return {
+    durationHours,
+    dataSource: parameters?.dataSource || 'imd_style_forward_forecast',
+    steeringSource: lastStep?.cyclone?.steeringSource || 'configured',
+    trackModel: 'imd_style_recurving',
+    landfall: landfallPoint
+      ? {
+          hour: landfallPoint.hour,
+          latitude: landfallPoint.latitude,
+          longitude: landfallPoint.longitude,
+          windSpeedKmh: landfallPoint.windSpeedKmh,
+        }
+      : null,
+    positions,
+  }
 }
 
 export { coneRadiusForHour, destinationPoint, isIndianLand, windRadii }

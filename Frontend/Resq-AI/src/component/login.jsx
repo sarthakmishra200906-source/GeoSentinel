@@ -4,6 +4,12 @@ import { API_URL } from '../api'
 
 const queryParams = new URLSearchParams(window.location.search)
 
+// Local showcase account only. The button is rendered in development builds.
+const DEMO_ADMIN = {
+  identifier: 'demo.admin@geosentinel.local',
+  password: 'DemoAdmin@2026',
+}
+
 export default class Login extends Component {
   state = {
     identifier: '',
@@ -18,17 +24,13 @@ export default class Login extends Component {
     isSubmitting: false,
   }
 
-  submit = async (event) => {
-    event.preventDefault()
+  performLogin = async (identifier, password) => {
     this.setState({ error: '', success: '', isSubmitting: true })
     try {
       const response = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          identifier: this.state.identifier.trim(),
-          password: this.state.password,
-        }),
+        body: JSON.stringify({ identifier, password }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to log in')
@@ -38,6 +40,16 @@ export default class Login extends Component {
     } finally {
       this.setState({ isSubmitting: false })
     }
+  }
+
+  submit = (event) => {
+    event.preventDefault()
+    this.performLogin(this.state.identifier.trim(), this.state.password)
+  }
+
+  useDemoAdmin = () => {
+    this.setState({ identifier: DEMO_ADMIN.identifier, password: DEMO_ADMIN.password })
+    this.performLogin(DEMO_ADMIN.identifier, DEMO_ADMIN.password)
   }
 
   requestReset = async (event) => {
@@ -234,6 +246,17 @@ export default class Login extends Component {
             Forgot password?
           </button>
         </div>
+
+        {import.meta.env.DEV && (
+          <button
+            className="auth-demo-button"
+            type="button"
+            onClick={this.useDemoAdmin}
+            disabled={this.state.isSubmitting}
+          >
+            <span aria-hidden="true">⚡</span> Use demo admin — one-tap sign in
+          </button>
+        )}
       </form>
     )
   }

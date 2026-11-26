@@ -5,6 +5,7 @@ import {
   calculateSimulationStep,
   coneRadiusForHour,
   isIndianLand,
+  projectForwardTrack,
   windRadii,
 } from '../services/simulationEngine.js'
 
@@ -99,4 +100,69 @@ test('forward steps are deterministic for the same input and timestamp', () => {
   assert.deepEqual(first, repeat)
   assert.ok(first.impacts.districts.every((item) => typeof item.projectedWindKmh === 'number'))
   assert.ok(first.impacts.states.every((item) => typeof item.distanceToTrackKm === 'number'))
+})
+
+function segmentBearing(start, end) {
+  const startLatitude = start.latitude * Math.PI / 180
+  const endLatitude = end.latitude * Math.PI / 180
+  const longitudeDelta = (end.longitude - start.longitude) * Math.PI / 180
+  const y = Math.sin(longitudeDelta) * Math.cos(endLatitude)
+  const x = Math.cos(startLatitude) * Math.sin(endLatitude) -
+    Math.sin(startLatitude) * Math.cos(endLatitude) * Math.cos(longitudeDelta)
+  return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360
+}
+
+test('the expected IMD-style track recurves instead of running in a straight line', () => {
+  const parameters = forwardParameters({
+    startLatitude: 17.6,
+    startLongitude: 88.8,
+    headingDeg: 290,
+    forwardSpeedKmh: 22,
+  })
+  const track = projectForwardTrack(parameters, 24)
+  const earlyBearing = segmentBearing(track.positions[0], track.positions[3])
+  const lateBearing = segmentBearing(track.positions[20], track.positions[23])
+
+  assert.equal(track.trackModel, 'imd_style_recurving')
+  assert.ok(lateBearing > earlyBearing + 10, `expected a poleward bend, got ${earlyBearing.toFixed(1)}° → ${lateBearing.toFixed(1)}°`)
+  assert.ok(track.positions.at(-1).headingDeg > track.positions[0].headingDeg + 15)
+  assert.ok(track.positions.at(-1).latitude > track.positions[0].latitude + 1)
+})
+
+test('the expected track reports a first landfall hour and position', () => {
+  const parameters = forwardParameters({
+    startLatitude: 20.5,
+    startLongitude: 88.5,
+    headingDeg: 300,
+    forwardSpeedKmh: 25,
+  })
+  const track = projectForwardTrack(parameters, 24)
+
+  assert.ok(track.landfall)
+  assert.ok(track.landfall.hour >= 1 && track.landfall.hour <= 24)
+  assert.equal(track.landfall.hour, track.positions.find((point) => point.isLandfall).hour)
+  assert.ok(track.landfall.latitude > 18 && track.landfall.latitude < 24)
+})
+
+test('hourly weather steering changes the expected path and committed steps', () => {
+  const configured = forwardParameters()
+  const weatherSteering = Array.from({ length: 24 }, (_, index) => ({
+    hour: index + 1,
+    headingDeg: 90,
+    forwardSpeedKmh: 10,
+  }))
+  const weatherDriven = forwardParameters({ weatherSteering })
+
+  const configuredPreview = projectForwardTrack(configured, 12)
+  const weatherPreview = projectForwardTrack(weatherDriven, 12)
+  const step = calculateSimulationStep(weatherDriven, 3, START)
+
+  assert.equal(configuredPreview.steeringSource, 'configured')
+  assert.equal(weatherPreview.steeringSource, 'open_meteo_hourly')
+  assert.equal(weatherPreview.positions.length, 12)
+  assert.notEqual(weatherPreview.positions.at(-1).longitude, configuredPreview.positions.at(-1).longitude)
+  assert.equal(step.cyclone.steeringSource, 'open_meteo_hourly')
+  assert.equal(step.cyclone.weatherSteeredHours, 3)
+  assert.equal(step.cyclone.appliedHeadingDeg, 90)
+  assert.equal(step.cyclone.appliedForwardSpeedKmh, 10)
 })

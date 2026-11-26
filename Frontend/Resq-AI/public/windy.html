@@ -57,6 +57,9 @@
         box-shadow: 0 1px 4px rgba(0,0,0,0.6);
         pointer-events: none;
       }
+      .cyclone-label.forming { background: rgba(234, 88, 12, 0.95); }
+      .cyclone-label.upcoming { background: rgba(202, 138, 4, 0.95); }
+      .cyclone-label.recent { background: rgba(100, 116, 139, 0.95); }
       .cyclone-popup-content {
         min-width: 210px;
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -142,6 +145,37 @@
           }
         }
 
+        function escapeHtml(value) {
+          return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+          })[char])
+        }
+
+        function stormBadge(status) {
+          const badges = {
+            ACTIVE_LIVE_GDACS: { className: 'active', label: 'ACTIVE · GDACS' },
+            ACTIVE_ATCF: { className: 'active', label: 'ACTIVE · ATCF' },
+            FORMING_DEPRESSION: { className: 'forming', label: 'FORMING DEPRESSION' },
+            FORMING_INVEST: { className: 'forming', label: 'FORMING · INVEST' },
+            UPCOMING_GDACS: { className: 'upcoming', label: 'UPCOMING' },
+            RECENT_GDACS: { className: 'recent', label: 'RECENT · ENDED' },
+          }
+          return badges[status] || { className: 'unconfirmed', label: 'STATUS UNCONFIRMED' }
+        }
+
+        function coneRadiusForLeadHours(hour) {
+          const anchors = [[6, 25], [12, 45], [24, 75], [48, 120]]
+          if (hour <= anchors[0][0]) return anchors[0][1]
+          for (let index = 1; index < anchors.length; index += 1) {
+            const [endHour, endRadius] = anchors[index]
+            if (hour <= endHour) {
+              const [startHour, startRadius] = anchors[index - 1]
+              return Math.round(startRadius + (endRadius - startRadius) * (hour - startHour) / (endHour - startHour))
+            }
+          }
+          return anchors[anchors.length - 1][1]
+        }
+
         function setupLayers(map) {
           if (!cycloneLayerGroup) {
             cycloneLayerGroup = L.layerGroup().addTo(map)
@@ -155,12 +189,17 @@
               const satellitePane = windyInstance.map.createPane('satellitePane')
               satellitePane.style.zIndex = '250'
               satellitePane.style.pointerEvents = 'none'
+              // NASA GIBS WMTS is free and needs no API key. MODIS Terra true-colour
+              // imagery reveals the broad swirling cloud bands of tropical systems.
+              const imageryDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
               satelliteLayer = L.tileLayer(
-                'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${imageryDate}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`,
                 {
-                  attribution: 'Tiles &copy; Esri',
-                  maxZoom: 19,
-                  opacity: 1,
+                  attribution: 'Imagery &copy; NASA EOSDIS GIBS',
+                  maxNativeZoom: 9,
+                  maxZoom: 18,
+                  tileSize: 256,
+                  opacity: 0.78,
                   pane: 'satellitePane',
                 }
               )
@@ -169,7 +208,7 @@
               satelliteLayer.addTo(windyInstance.map)
             }
             satelliteLayer.bringToFront()
-            updateIndicator('<span>🛰️ Esri satellite imagery active</span>', '#38bdf8')
+            updateIndicator('<span>🛰️ NASA GIBS cloud imagery active</span>', '#38bdf8')
           } else {
             if (satelliteLayer && windyInstance.map.hasLayer(satelliteLayer)) {
               windyInstance.map.removeLayer(satelliteLayer)
@@ -223,7 +262,43 @@
               poly.addTo(cycloneLayerGroup)
             }
 
-            // GDACS does not always publish wind radii; never invent warning zones.
+            // JTWC/NHC forecast points are drawn as an IMD-style cone of uncertainty.
+            if (Array.isArray(storm.forecastTrack) && storm.forecastTrack.length > 0) {
+              const forecastPoints = storm.forecastTrack
+                .filter((point) => Array.isArray(point) && point.length >= 2 && Number.isFinite(Number(point[0])) && Number.isFinite(Number(point[1])))
+                .map((point) => [Number(point[0]), Number(point[1])])
+              if (forecastPoints.length > 1) {
+                L.polyline([eye, ...forecastPoints], {
+                  color: '#fbbf24',
+                  weight: 3,
+                  dashArray: '5, 6',
+                  opacity: 0.95,
+                }).addTo(cycloneLayerGroup)
+              }
+              storm.forecastTrack.forEach((point) => {
+                const leadHours = Number(point[2])
+                if (!Array.isArray(point) || !Number.isFinite(Number(point[0])) || !Number.isFinite(Number(point[1]))) return
+                if (Number.isFinite(leadHours) && leadHours > 0) {
+                  L.circle([Number(point[0]), Number(point[1])], {
+                    radius: coneRadiusForLeadHours(leadHours) * 1000,
+                    color: '#f59e0b',
+                    fillColor: '#fbbf24',
+                    fillOpacity: 0.08,
+                    weight: 1,
+                    dashArray: '6, 6',
+                  }).addTo(cycloneLayerGroup)
+                }
+                L.circleMarker([Number(point[0]), Number(point[1])], {
+                  radius: 4,
+                  color: '#b45309',
+                  fillColor: '#fbbf24',
+                  fillOpacity: 0.95,
+                  weight: 1,
+                }).bindPopup(`+${Number.isFinite(leadHours) ? leadHours : '?'}h forecast point`).addTo(cycloneLayerGroup)
+              })
+            }
+
+            // Providers do not always publish wind radii; never invent warning zones.
             if (storm.radiiKm?.warning) {
               L.circle(eye, {
                 radius: storm.radiiKm.warning * 1000,
@@ -244,32 +319,30 @@
               }).addTo(cycloneLayerGroup)
             }
 
-            // 4. Animated spinning cyclone eye icon
-            const cleanName = (storm.name || 'Cyclone').replace(/^🌀\s*/, '')
+            // Animated spinning cyclone eye icon with a status-coloured badge.
+            const badge = stormBadge(storm.status)
+            const cleanName = escapeHtml((storm.name || 'Cyclone').replace(/^🌀\s*/, ''))
             const icon = L.divIcon({
               className: 'cyclone-marker-icon',
-              html: `<div class="cyclone-pin" title="${cleanName}"><span class="cyclone-spin">🌀</span><span class="cyclone-label">${cleanName}</span></div>`,
+              html: `<div class="cyclone-pin" title="${cleanName}"><span class="cyclone-spin">🌀</span><span class="cyclone-label ${escapeHtml(badge.className)}">${cleanName}</span></div>`,
               iconSize: [40, 40],
               iconAnchor: [20, 20],
             })
 
             const marker = L.marker(eye, { icon }).addTo(cycloneLayerGroup)
-
+            const sourceLabel = escapeHtml(storm.source || (Array.isArray(storm.sources) ? storm.sources.join(' + ') : 'unknown'))
+            const forecastCount = Array.isArray(storm.forecastTrack) ? storm.forecastTrack.length : 0
             const popupContent = `
               <div class="cyclone-popup-content">
                 <div class="cyclone-popup-header">🌀 ${cleanName}</div>
-                <div class="cyclone-popup-row"><b>Status:</b> ${(storm.status || 'Unconfirmed').replaceAll('_', ' ')}</div>
-                <div class="cyclone-popup-row"><b>Category:</b> ${storm.category || 'Tropical Storm'}</div>
+                <div class="cyclone-popup-row"><b>Status:</b> ${escapeHtml(badge.label)}</div>
+                <div class="cyclone-popup-row"><b>Category:</b> ${escapeHtml(storm.category || 'Tropical Storm')}</div>
                 <div class="cyclone-popup-row"><b>Max Wind:</b> ${storm.maxWindKmh || '—'} km/h</div>
-                ${storm.pressureHpa ? `<div class="cyclone-popup-row"><b>Central Pressure:</b> ${storm.pressureHpa} hPa</div>` : ''}
-                ${storm.basin ? `<div class="cyclone-popup-row"><b>Basin:</b> ${storm.basin}</div>` : ''}
+                ${storm.centralPressureHpa ? `<div class="cyclone-popup-row"><b>Central Pressure:</b> ${storm.centralPressureHpa} hPa</div>` : ''}
+                ${storm.basin ? `<div class="cyclone-popup-row"><b>Basin:</b> ${escapeHtml(storm.basin)}</div>` : ''}
+                <div class="cyclone-popup-row"><b>Source:</b> ${sourceLabel}</div>
+                <div class="cyclone-popup-row"><b>Forecast points:</b> ${forecastCount}</div>
                 <div class="cyclone-popup-row"><b>Eye:</b> ${eye[0].toFixed(2)}°, ${eye[1].toFixed(2)}°</div>
-                ${storm.landfallRisk && storm.landfallRisk.length ? `
-                  <div class="cyclone-popup-threat">
-                    <strong>Threatened Areas:</strong><br />
-                    ${storm.landfallRisk.join(', ')}
-                  </div>
-                ` : ''}
               </div>
             `
             marker.bindPopup(popupContent)
